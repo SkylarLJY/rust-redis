@@ -34,7 +34,7 @@ impl RespValue for RError {
 #[derive(Debug, PartialEq)]
 pub struct RInteger(pub i64);
 
-impl  RespValue for RInteger {
+impl RespValue for RInteger {
     fn serialize(&self) -> String {
         format!(":{}\r\n", self.0)
     }
@@ -47,38 +47,20 @@ impl RespValue for BulkString {
     fn serialize(&self) -> String {
         match &self.0 {
             None => "$-1\r\n".to_string(),
-            Some(b) => format!("${}\r\n{}\r\n", b.len(), String::from_utf8_lossy(b))
+            Some(b) => format!("${}\r\n{}\r\n", b.len(), String::from_utf8_lossy(b)),
         }
     }
 }
 
 // An RArray can itself be null and its elements can be null too.
-// The elements should be unparsed RESP strings 
 #[derive(Debug, PartialEq)]
-pub struct RArray(pub Option<Vec<String>>);
-
+pub struct RArray{
+    pub size: usize,
+    pub elements: String
+}
 impl RespValue for RArray {
     fn serialize(&self) -> String {
-        match &self.0 {
-            None => "*-1\r\n".to_string(),
-            Some(v) => {
-                format!("*{}\r\n{}", v.len(), v.join(""))
-            }
-        }
+        format!("*{}\r\n{}", self.size, self.elements)
     }
 }
 
-impl RArray {
-    pub fn next(&self) -> Option<&str> {
-        match &self.0 {
-            None => None,
-            Some(v) => {
-                if v.len() == 0 {
-                    None
-                } else {
-                    Some(&v[0])
-                }
-            }
-        }
-    }
-}
