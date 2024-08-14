@@ -1,161 +1,128 @@
-use super::resp_value::RArray;
-use super::resp_value::BulkString;
-use super::resp_value::RError;
-use super::resp_value::RInteger;
-use super::resp_value::RespValue;
-use super::resp_value::SimpleString;
-use super::resp_value::CRLF;
-use super::resp_value::NULL_ARRAY;
-use super::resp_value::NULL_BULK_STRING;
+use std::str::Lines;
 
-// Clients send commands to a Redis Server as a RESP Array of Bulk Strings.
-pub fn deserialize_request(input: String) -> RArray {
-    parse_array(&input)
-}
+use super::resp_value::RespType;
 
-fn parse_array(input: &str) -> RArray {
-    if input == NULL_ARRAY {
-        return RArray{size: 0, elements: "".to_string()};
-    }
-    let parts: Vec<&str> = input.splitn(2, CRLF).collect();
-    let size_str  = parts[0].chars().skip(1).collect::<String>();
-    let size = size_str.parse().unwrap();
-    RArray{size, elements: parts[1].to_string()}
-}
-
-impl RArray {
-    pub fn next(&self) -> (Box<dyn RespValue>, RArray) {
-        let (val, elements) = lazy_parse(&self.elements);
-        let size = self.size - 1;
-        (val, RArray{size, elements})
+//TODO: add error handling
+pub fn deserialize(input: &str) -> RespType {
+    let mut lines = input.lines();
+    if let Some(line) = lines.next() {
+        deserialize_single(line, &mut lines)
+    } else {
+        panic!("Empty input");
     }
 }
 
-// parse array elements on request
-// TODO: get value from Box
-fn lazy_parse(input: &str) -> (Box<dyn RespValue>, String){
-    let leading_char = input.chars().nth(0).unwrap();
-    match leading_char{
-        '+' => {
-            let res: Vec<&str> = input.splitn(2, CRLF).collect();
-            (Box::new(SimpleString(res[0][1..].to_string())), res[1].to_string())
-        }
-        '-' => {
-            let res: Vec<&str> = input.splitn(2, CRLF).collect();
-            (Box::new(RError(res[0][1..].to_string())), res[1].to_string())
-        }
-        ':' => {
-            let res: Vec<&str> = input.splitn(2, CRLF).collect();
-            let val: i64 = res[0][1..].parse().unwrap();
-            (Box::new(RInteger(val)), res[1].to_string())
-        }
-        '$' => {
-            if input == NULL_BULK_STRING {
-                return (Box::new(BulkString(None)), "".to_string());
+fn deserialize_single(input: &str, lines: &mut Lines) -> RespType {
+    match input.chars().next() {
+        Some('+') => RespType::SimpleString(input[1..].to_string()),
+        Some('-') => RespType::Error(input[1..].to_string()),
+        Some(':') => RespType::Integer(input[1..].parse().unwrap()),
+        Some('$') => {
+            let len = input[1..].parse().unwrap();
+            if len == -1 {
+                RespType::BulkString(None)
+            } else {
+                read_bulk_string(len, lines)
             }
-            let res: Vec<&str> = input.splitn(3, CRLF).collect();
-            let len_str: String = res[0].chars().skip(1).collect();
-            let len: isize = len_str.parse().unwrap();
-            let val = res[1].to_string();
-            (Box::new(BulkString(Some(val.into_bytes()))), res[2].to_string())
-        
         }
-        '*' => todo!("lazy parse array"),
-        _ => panic!("Invalid RESP type")
-    
+        Some('*') => {
+            let len = input[1..].parse().unwrap();
+            if len == -1 {
+                RespType::Array(None)
+            } else {
+                let mut res = Vec::with_capacity(len as usize);
+                for _ in 0..len {
+                    if let Some(line) = lines.next() {
+                        res.push(deserialize_single(line, lines));
+                    }
+                }
+                RespType::Array(Some(res))
+            }
+        }
+        Some(_) => panic!("Invalid input"),
+        None => panic!("Empty input"),
     }
 }
 
-fn parse_simple_string(input: &str) -> SimpleString {
-    let res: Vec<&str> = input.splitn(2, CRLF).collect();
-    SimpleString(res[0][1..].to_string())
-}
-
-fn parse_error(input: &str) -> RError {
-    let res: Vec<&str> = input.split(CRLF).collect();
-    RError(res[0][1..].to_string())
-}
-
-fn parse_integer(input: &str) -> RInteger {
-    let res: Vec<&str> = input.split(CRLF).collect();
-    let val: i64 = res[0][1..].parse().unwrap();
-    RInteger(val)
-}
-
-
-fn parse_bulk_string(input: &str) -> BulkString {
-    if input == "$-1\r\n" {
-        return BulkString(None);
+fn read_bulk_string(len: i64, lines: &mut Lines) -> RespType {
+    // read by line until have enough bytes
+    let mut res: Vec<u8> = Vec::with_capacity(len as usize);
+    while res.len() < len as usize {
+        if let Some(line) = lines.next() {
+            res.extend_from_slice(line.as_bytes());
+        }
     }
-    let res: Vec<&str> = input.split(CRLF).collect();
-    let len_str: String = res[0].chars().skip(1).collect();
-    let len: isize = len_str.parse().unwrap();
 
-    let val = res[1].to_string();
-    BulkString(Some(val.into_bytes()))
+    RespType::BulkString(Some(res))
 }
 
 #[cfg(test)]
-mod test {
-    use crate::resp::resp_value::{BulkString, RArray, RError, RInteger, SimpleString};
+mod tests {
+    use super::*;
 
     #[test]
-    fn test_parse_simple_string() {
-        let input = "+OK\r\n".to_string();
-        let output = super::parse_simple_string(&input);
-        assert_eq!(output, SimpleString("OK".to_string()));
+    fn test_deserialize_simple_string() {
+        let input = "+OK\r\n";
+        let expected = RespType::SimpleString("OK".to_string());
+        assert_eq!(deserialize(input), expected);
     }
 
     #[test]
-    fn test_parse_error() {
-        let input = "-Error message\r\n".to_string();
-        let output = super::parse_error(&input);
-
-        assert!(output.eq(&RError("Error message".to_string())));
+    fn test_deserialize_null_array(){
+        let input = "*-1\r\n";
+        let expected = RespType::Array(None);
+        assert_eq!(deserialize(input), expected);
     }
 
     #[test]
-    fn test_parse_integer() {
-        let input = ":1000\r\n".to_string();
-        let output = super::parse_integer(&input);
-        assert_eq!(output, RInteger(1000));
+    fn test_deserialize_null_bulk_string(){
+        let input = "$-1\r\n";
+        let expected = RespType::BulkString(None);
+        assert_eq!(deserialize(input), expected);
     }
 
     #[test]
-    fn test_parse_bulk_string() {
-        let input = "$6\r\nfoobar\r\n".to_string();
-        let output = super::parse_bulk_string(&input);
-        assert_eq!(output, BulkString(Some("foobar".as_bytes().to_vec())));
+    fn test_seserialize_bulk_string() {
+        let input = "$6\r\nfoobar\r\n";
+        let expected = RespType::BulkString(Some("foobar".to_string().into_bytes()));
+        assert_eq!(deserialize(input), expected);
     }
 
     #[test]
-    fn test_parse_array() {
-        let input = "*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n".to_string();
-        let output = super::parse_array(&input);
-        assert_eq!(
-            output,
-            RArray{size: 2, elements: "$3\r\nfoo\r\n$3\r\nbar\r\n".to_string()}
-        );
+    fn test_deserialize_array_simple() {
+        let input = "*2\r\n+foo\r\n-bar\r\n";
+        let expected = RespType::Array(Some(vec![
+            RespType::SimpleString("foo".to_string()),
+            RespType::Error("bar".to_string()),
+
+        ]));
+        assert_eq!(deserialize(input), expected);
     }
 
     #[test]
-    fn test_parse_null_bulkstr() {
-        let input = "$-1\r\n".to_string();
-        let output = super::parse_bulk_string(&input);
-        assert_eq!(output, BulkString(None));
+    fn test_deserialize_array_of_bulk_string() {
+        let input = "*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n";
+        let expected = RespType::Array(Some(vec![
+            RespType::BulkString(Some("foo".to_string().into_bytes())),
+            RespType::BulkString(Some("bar".to_string().into_bytes())),
+        ]));
+        assert_eq!(deserialize(input), expected);
     }
 
     #[test]
-    fn test_parse_null_array() {
-        let input = "*-1\r\n".to_string();
-        let output = super::parse_array(&input);
-        assert_eq!(output, RArray{size: 0, elements: "".to_string()});
-    }
-
-    #[test]
-    fn test_lazy_parse() {
-        let input = "$3\r\nfoo\r\n$3\r\nbar\r\n".to_string();
-        let (head, tail) = super::lazy_parse(&input);
-        assert_eq!(tail, "$3\r\nbar\r\n".to_string());
+    fn test_deserialize_nested_array(){
+        let input = "*2\r\n*2\r\n+foo\r\n-bar\r\n*2\r\n+foo\r\n-bar\r\n";
+        let expected = RespType::Array(Some(vec![
+            RespType::Array(Some(vec![
+                RespType::SimpleString("foo".to_string()),
+                RespType::Error("bar".to_string()),
+            ])),
+            RespType::Array(Some(vec![
+                RespType::SimpleString("foo".to_string()),
+                RespType::Error("bar".to_string()),
+            ]),
+            ),
+        ]));
+        assert_eq!(deserialize(input), expected);
     }
 }

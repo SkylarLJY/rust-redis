@@ -1,66 +1,33 @@
-use regex::Regex;
-
-pub const CRLF: &str = "\r\n";
-pub const NULL_BULK_STRING: &str = "$-1\r\n";
-pub const NULL_ARRAY: &str = "*-1\r\n";
-use once_cell::sync::Lazy;
-
-// pub static RESP_REGEX: Regex = Regex::new(r"(\+|-|:|\$|\*).*(\r\n)").unwrap();
-pub static CRLF_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\r\n").unwrap());
-pub static RARRAY_HEAD_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\*([0-9]+)(\r\n)").unwrap());
-
-pub trait RespValue {
-    fn serialize(&self) -> String;
+#[derive(Debug, PartialEq)]
+pub enum RespType {
+    SimpleString(String),
+    Error(String),
+    Integer(i64),
+    BulkString(Option<Vec<u8>>),
+    Array(Option<Vec<RespType>>),
 }
 
-#[derive(Debug, PartialEq)]
-pub struct SimpleString(pub String);
+impl RespType {
+    pub fn serialize(&self) -> String {
+        match self {
+            RespType::SimpleString(s) => format!("+{}\r\n", s),
+            RespType::Error(e) => format!("-{}\r\n", e),
+            RespType::Integer(i) => format!(":{}\r\n", i),
+            RespType::BulkString(b) => match b {
+                None => "$-1\r\n".to_string(),
+                Some(b) => format!("${}\r\n{}\r\n", b.len(), String::from_utf8_lossy(b)),
+            },
+            RespType::Array(a) => match a {
+                None => "*-1\r\n".to_string(),
+                Some(a) => {
+                    let mut res = format!("*{}\r\n", a.len());
+                    for e in a {
+                        res.push_str(&e.serialize());
+                    }
+                    res
+                }
+            }
 
-impl RespValue for SimpleString {
-    fn serialize(&self) -> String {
-        format!("+{}\r\n", self.0)
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct RError(pub String);
-
-impl RespValue for RError {
-    fn serialize(&self) -> String {
-        format!("-{}\r\n", self.0)
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct RInteger(pub i64);
-
-impl RespValue for RInteger {
-    fn serialize(&self) -> String {
-        format!(":{}\r\n", self.0)
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct BulkString(pub Option<Vec<u8>>);
-
-impl RespValue for BulkString {
-    fn serialize(&self) -> String {
-        match &self.0 {
-            None => "$-1\r\n".to_string(),
-            Some(b) => format!("${}\r\n{}\r\n", b.len(), String::from_utf8_lossy(b)),
         }
     }
 }
-
-// An RArray can itself be null and its elements can be null too.
-#[derive(Debug, PartialEq)]
-pub struct RArray{
-    pub size: usize,
-    pub elements: String
-}
-impl RespValue for RArray {
-    fn serialize(&self) -> String {
-        format!("*{}\r\n{}", self.size, self.elements)
-    }
-}
-
