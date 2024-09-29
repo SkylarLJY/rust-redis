@@ -1,3 +1,5 @@
+use super::constants::{NULL_ARRAY, NULL_BULK_STRING};
+
 #[derive(Debug, PartialEq)]
 pub enum RespType {
     SimpleString(String),
@@ -28,6 +30,28 @@ impl RespType {
                 }
             }
 
+        }
+    }
+
+    pub fn get_byte_length(&self) -> usize {
+        match self {
+            RespType::SimpleString(s) => s.len() + 3,
+            RespType::Error(e) => e.len() + 3,
+            RespType::Integer(i) => i.to_string().len() + 3,
+            RespType::BulkString(b) => match b {
+                None => NULL_BULK_STRING.len(), 
+                Some(b) => b.len() + 5 + b.len().to_string().len(), // ${len}\r\n{content}\r\n
+            },
+            RespType::Array(a) => match a {
+                None => NULL_ARRAY.len(), 
+                Some(a) => {
+                    let mut res = 3 + a.len().to_string().len(); // *{len}\r\n
+                    for e in a {
+                        res += e.get_byte_length();
+                    }
+                    res
+                }
+            }
         }
     }
 }

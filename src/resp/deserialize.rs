@@ -1,59 +1,91 @@
-use std::str::Lines;
-
 use super::resp_value::RespType;
+use super::constants::*;
 
 //TODO: add error handling
-pub fn deserialize(input: &str) -> RespType {
-    let mut lines = input.lines();
-    if let Some(line) = lines.next() {
-        deserialize_single(line, &mut lines)
-    } else {
-        panic!("Empty input");
-    }
-}
-
-fn deserialize_single(input: &str, lines: &mut Lines) -> RespType {
-    match input.chars().next() {
-        Some('+') => RespType::SimpleString(input[1..].to_string()),
-        Some('-') => RespType::Error(input[1..].to_string()),
-        Some(':') => RespType::Integer(input[1..].parse().unwrap()),
-        Some('$') => {
-            let len = input[1..].parse().unwrap();
-            if len == -1 {
-                RespType::BulkString(None)
-            } else {
-                read_bulk_string(len, lines)
-            }
-        }
-        Some('*') => {
-            let len = input[1..].parse().unwrap();
-            if len == -1 {
-                RespType::Array(None)
-            } else {
-                let mut res = Vec::with_capacity(len as usize);
-                for _ in 0..len {
-                    if let Some(line) = lines.next() {
-                        res.push(deserialize_single(line, lines));
-                    }
-                }
-                RespType::Array(Some(res))
-            }
-        }
-        Some(_) => panic!("Invalid input"),
+// return (RespType, number of bytes consumed)
+pub fn deserialize(input: &[u8]) -> (RespType, usize) {
+    let res;
+    match input.get(0) {
+        Some(&SIMPLE_STRING_PREFIX) => {
+            let end_idx = input.iter().position(|&c| c == b'\r').unwrap();
+            res = RespType::SimpleString(u8_to_string(&input[1..end_idx]));
+        },
+        Some(&ERROR_PREFIX) => {
+            let end_idx = input.iter().position(|&c| c == b'\r').unwrap();
+            res = RespType::Error(u8_to_string(&input[1..end_idx]));
+        },
+        Some(&INTEGER_PREFIX) => {
+            let end_idx = input.iter().position(|&c| c == b'\r').unwrap();
+            let num = u8_to_string(&input[1..end_idx]).parse().unwrap();
+            res = RespType::Integer(num);
+        },
+        Some(&BULK_STRING_PREFIX) => {
+            res = deserialize_bulk_string(input);
+        },
+        Some(&ARRAY_PREFIX) => {
+            res = deserialize_array(input);
+        },
         None => panic!("Empty input"),
+        Some(_) => panic!("Invalid input"),
     }
+    let len = res.get_byte_length();
+    (res, len)
 }
 
-fn read_bulk_string(len: i64, lines: &mut Lines) -> RespType {
-    // read by line until have enough bytes
-    let mut res: Vec<u8> = Vec::with_capacity(len as usize);
-    while res.len() < len as usize {
-        if let Some(line) = lines.next() {
-            res.extend_from_slice(line.as_bytes());
-        }
+pub fn deserialize_bulk_string(input: &[u8]) -> RespType {
+    // validate input
+    if input.len() < 4 || input[0] != BULK_STRING_PREFIX {
+        panic!("Invalid input");
     }
+    if input.len() == NULL_BULK_STRING.len() && input[1] == b'-' && input[2] == b'1' {
+        return RespType::BulkString(None);
+    }
+    let (len, content_start_idx) = get_length_and_content_start_idx(input);
+    let content  = &input[content_start_idx..content_start_idx + len];
+    RespType::BulkString(Some(content.to_vec()))
+}
 
-    RespType::BulkString(Some(res))
+pub fn deserialize_array(input: &[u8]) -> RespType {
+    // validate input
+    if input.len() < 4 || input[0] != ARRAY_PREFIX {
+        panic!("Invalid input");
+    }
+    if input.len() == NULL_ARRAY.len() && input[1] == b'-' && input[2] == b'1' {
+        return RespType::Array(None);
+    }
+    let (len, mut content_start_idx) = get_length_and_content_start_idx(&input);
+
+    // for now parse all elements at once. May switch to lazy parsing in the future
+    let mut content: Vec<RespType> = Vec::with_capacity(len);
+    for _ in 0..len {
+        let (elem, bytes_consumed) = deserialize(&input[content_start_idx..]);
+        content.push(elem);
+        content_start_idx += bytes_consumed;
+    }
+    RespType::Array(Some(content))
+}
+
+fn get_length_and_content_start_idx(input: &[u8]) -> (usize, usize) {
+    let crlf_idx = match input.iter().position(|&c| c == b'\r') {
+        Some(idx) => idx,
+        None => panic!("Failed to find crlf in input"),
+    };
+    let len_str = match std::str::from_utf8(&input[1..crlf_idx]){
+        Ok(s) => s,
+        Err(_) => panic!("Failed to parse length string into utf8 string"),
+    };
+    let len: usize = match len_str.parse() {
+        Ok(n) => n,
+        Err(_) => panic!("Failed to parse length string into integer"),
+    };
+    (len, crlf_idx + 2)
+}
+
+fn u8_to_string(input: &[u8]) -> String {
+    match std::str::from_utf8(input) {
+        Ok(s) => s.to_string(),
+        Err(_) => panic!("Failed to convert input to string"),
+    }
 }
 
 #[cfg(test)]
@@ -62,56 +94,49 @@ mod tests {
 
     #[test]
     fn test_deserialize_simple_string() {
-        let input = "+OK\r\n";
+        let input = b"+OK\r\n";
         let expected = RespType::SimpleString("OK".to_string());
-        assert_eq!(deserialize(input), expected);
+        assert_eq!(deserialize(input), (expected, input.len()));
     }
 
     #[test]
     fn test_deserialize_null_array(){
-        let input = "*-1\r\n";
+        let input = NULL_ARRAY;
         let expected = RespType::Array(None);
-        assert_eq!(deserialize(input), expected);
+        assert_eq!(deserialize(input), (expected, input.len()));
     }
 
     #[test]
     fn test_deserialize_null_bulk_string(){
-        let input = "$-1\r\n";
+        let input = NULL_BULK_STRING;
         let expected = RespType::BulkString(None);
-        assert_eq!(deserialize(input), expected);
-    }
-
-    #[test]
-    fn test_seserialize_bulk_string() {
-        let input = "$6\r\nfoobar\r\n";
-        let expected = RespType::BulkString(Some("foobar".to_string().into_bytes()));
-        assert_eq!(deserialize(input), expected);
+        assert_eq!(deserialize(input), (expected, input.len()));
     }
 
     #[test]
     fn test_deserialize_array_simple() {
-        let input = "*2\r\n+foo\r\n-bar\r\n";
+        let input = b"*2\r\n+foo\r\n-bar\r\n";
         let expected = RespType::Array(Some(vec![
             RespType::SimpleString("foo".to_string()),
             RespType::Error("bar".to_string()),
 
         ]));
-        assert_eq!(deserialize(input), expected);
+        assert_eq!(deserialize(input), (expected, input.len()));
     }
 
     #[test]
     fn test_deserialize_array_of_bulk_string() {
-        let input = "*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n";
+        let input = b"*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n";
         let expected = RespType::Array(Some(vec![
             RespType::BulkString(Some("foo".to_string().into_bytes())),
             RespType::BulkString(Some("bar".to_string().into_bytes())),
         ]));
-        assert_eq!(deserialize(input), expected);
+        assert_eq!(deserialize(input), (expected, input.len()));
     }
 
     #[test]
     fn test_deserialize_nested_array(){
-        let input = "*2\r\n*2\r\n+foo\r\n-bar\r\n*2\r\n+foo\r\n-bar\r\n";
+        let input = b"*2\r\n*2\r\n+foo\r\n-bar\r\n*2\r\n+foo\r\n-bar\r\n";
         let expected = RespType::Array(Some(vec![
             RespType::Array(Some(vec![
                 RespType::SimpleString("foo".to_string()),
@@ -123,6 +148,29 @@ mod tests {
             ]),
             ),
         ]));
-        assert_eq!(deserialize(input), expected);
+        assert_eq!(deserialize(input), (expected, input.len()));
+    }
+
+    #[test]
+    fn test_deserialize_bulk_string_with_newline(){
+        let input = b"$8\r\nfoo\r\nbar\r\n";
+        let expected = RespType::BulkString(Some("foo\r\nbar".to_string().into_bytes()));
+        assert_eq!(deserialize(input), (expected, input.len()));
+    }
+
+    #[test]
+    fn test_deserialize_mixed_array() {
+        let input = b"*3\r\n+foo\r\n$3\r\nbar\r\n:42\r\n";
+        let expected = RespType::Array(Some(vec![
+            RespType::SimpleString("foo".to_string()),
+            RespType::BulkString(Some("bar".to_string().into_bytes())),
+            RespType::Integer(42),
+        ]));
+        assert_eq!(deserialize(input), (expected, input.len()));
+    }
+    
+    #[test]
+    fn test_deserialize_bulk_string_wrong_length(){
+        let input = b"$3\r\nfooooooo\r\n";
     }
 }
