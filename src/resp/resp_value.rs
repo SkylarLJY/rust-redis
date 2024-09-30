@@ -10,26 +10,30 @@ pub enum RespType {
 }
 
 impl RespType {
-    pub fn serialize(&self) -> String {
+    pub fn serialize(&self) -> Vec<u8> {
         match self {
-            RespType::SimpleString(s) => format!("+{}\r\n", s),
-            RespType::Error(e) => format!("-{}\r\n", e),
-            RespType::Integer(i) => format!(":{}\r\n", i),
+            RespType::SimpleString(s) => format!("+{}\r\n", s).into_bytes(),
+            RespType::Error(e) => format!("-{}\r\n", e).into_bytes(),
+            RespType::Integer(i) => format!(":{}\r\n", i).into_bytes(),
             RespType::BulkString(b) => match b {
-                None => "$-1\r\n".to_string(),
-                Some(b) => format!("${}\r\n{}\r\n", b.len(), String::from_utf8_lossy(b)),
+                None => NULL_BULK_STRING.to_vec(),
+                Some(b) => {
+                    let mut res = format!("${}\r\n", b.len()).into_bytes();
+                    res.extend_from_slice(b);
+                    res.extend_from_slice(b"\r\n");
+                    res
+                }
             },
             RespType::Array(a) => match a {
-                None => "*-1\r\n".to_string(),
+                None => NULL_ARRAY.to_vec(),
                 Some(a) => {
-                    let mut res = format!("*{}\r\n", a.len());
+                    let mut res = format!("*{}\r\n", a.len()).into_bytes();
                     for e in a {
-                        res.push_str(&e.serialize());
+                        res.extend_from_slice(&e.serialize());
                     }
                     res
                 }
             }
-
         }
     }
 
@@ -53,5 +57,51 @@ impl RespType {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_serialize_simple_string() {
+        let input = RespType::SimpleString("OK".to_string());
+        let expected = b"+OK\r\n";
+        assert_eq!(input.serialize(), expected);
+    }
+
+    #[test]
+    fn test_serialize_null_array() {
+        let input = RespType::Array(None);
+        let expected = NULL_ARRAY;
+        assert_eq!(input.serialize(), expected);
+    }
+
+    #[test]
+    fn test_serialize_null_bulk_string() {
+        let input = RespType::BulkString(None);
+        let expected = NULL_BULK_STRING;
+        assert_eq!(input.serialize(), expected);
+    }
+
+    #[test]
+    fn test_serialize_array_simple() {
+        let input = RespType::Array(Some(vec![
+            RespType::SimpleString("foo".to_string()),
+            RespType::Error("bar".to_string()),
+        ]));
+        let expected = b"*2\r\n+foo\r\n-bar\r\n";
+        assert_eq!(input.serialize(), expected);
+    }
+
+    #[test]
+    fn test_serialize_array_of_bulk_string() {
+        let input = RespType::Array(Some(vec![
+            RespType::BulkString(Some("foo".to_string().into_bytes())),
+            RespType::BulkString(Some("bar".to_string().into_bytes())),
+        ]));
+        let expected = b"*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n";
+        assert_eq!(input.serialize(), expected);
     }
 }
