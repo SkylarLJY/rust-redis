@@ -6,9 +6,9 @@ pub enum RedisCommand {
 
 impl RedisCommand {
     pub fn from_str(cmd: &str) -> Self {
-        match cmd {
-            "PING" => RedisCommand::Ping,
-            "ECHO" => RedisCommand::Echo,
+        match cmd.to_lowercase().as_str() {
+            "ping" => RedisCommand::Ping,
+            "echo" => RedisCommand::Echo,
             _ => RedisCommand::Unknown,
         }
     }
