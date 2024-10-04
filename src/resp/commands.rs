@@ -1,6 +1,8 @@
 pub enum RedisCommand {
     Ping,
     Echo,
+    Get,
+    Set,
     Unknown,
 }
 
@@ -9,6 +11,8 @@ impl RedisCommand {
         match cmd.to_lowercase().as_str() {
             "ping" => RedisCommand::Ping,
             "echo" => RedisCommand::Echo,
+            "get" => RedisCommand::Get,
+            "set" => RedisCommand::Set,
             _ => RedisCommand::Unknown,
         }
     }
@@ -17,6 +21,8 @@ impl RedisCommand {
         match self {
             RedisCommand::Ping => "PING",
             RedisCommand::Echo => "ECHO",
+            RedisCommand::Get => "GET",
+            RedisCommand::Set => "SET",
             RedisCommand::Unknown => "UNKNOWN",
         }
     }

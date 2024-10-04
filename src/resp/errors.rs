@@ -19,3 +19,21 @@ impl Display for DeserializeError {
         }
     }
 }
+
+#[derive(Debug, PartialEq)]
+pub enum DataStoreError {
+    LockError,
+    KeyNotFound,
+}
+
+impl Error for DataStoreError {}
+
+impl Display for DataStoreError {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            DataStoreError::LockError => write!(f, "Failed to acquire lock"),
+            DataStoreError::KeyNotFound => write!(f, "Key not found"),
+        }
+    }
+    
+}
