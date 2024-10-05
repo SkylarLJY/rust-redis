@@ -41,5 +41,49 @@ impl Display for DataStoreError {
             DataStoreError::DataLoadError => write!(f, "Failed to load data"),
         }
     }
-    
 }
+
+#[derive(Debug, PartialEq)]
+pub enum ServerError {
+    AcceptError,
+    ReadError,
+    RespParseError,
+    TypeError,
+    DataStoreError(DataStoreError),
+    UserInputError(UserInputError),
+}
+
+impl Error for ServerError {}
+
+impl Display for ServerError {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            ServerError::AcceptError => write!(f, "Failed to accept connection"),
+            ServerError::ReadError => write!(f, "Failed to read from stream"),
+            ServerError::RespParseError => write!(f, "Failed to parse RESP"),
+            ServerError::TypeError => write!(f, "Type error"),
+            ServerError::DataStoreError(e) => write!(f, "Data store error: {}", e),
+            ServerError::UserInputError(e) => write!(f, "User input error: {}", e),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum UserInputError {
+    InvalidInput(String),
+    DataStoreError(DataStoreError),
+    UnknownCommand,
+}
+
+impl Error for UserInputError {}
+    
+impl Display for UserInputError {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            UserInputError::InvalidInput(s) => write!(f, "Invalid input: {}", s),
+            UserInputError::DataStoreError(e) => write!(f, "Data store error: {}", e),
+            UserInputError::UnknownCommand => write!(f, "Unknown command"),
+        }
+    }
+}
+

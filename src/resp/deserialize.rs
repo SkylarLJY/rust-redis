@@ -51,7 +51,7 @@ pub fn deserialize_bulk_string(input: &[u8]) -> Result<RespType, DeserializeErro
 
     let content = &input[content_start_idx..content_start_idx + len];
     // check if content is at the end and followed by CRLF
-    if (input[content_start_idx + len] != b'\r' || input[content_start_idx + len + 1] != b'\n') {
+    if input[content_start_idx + len] != b'\r' || input[content_start_idx + len + 1] != b'\n' {
         return Err(DeserializeError::LengthMismatch("Bulk string length does not match content length".to_string()));
     }
 
