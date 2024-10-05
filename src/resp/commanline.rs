@@ -34,7 +34,6 @@ pub fn handle_input_cmd(input: &str) {
                     None => println!("OK"),
                     Some(e) => eprintln!("Failed to set value: {}", e),
                 }
-                save();
             } else {
                 println!("No key-value pair provided to SET");
             }

@@ -3,5 +3,5 @@ pub mod commands;
 pub mod commanline;
 pub mod datastore;
 mod resp_value;
-mod constants;
+pub mod constants;
 mod errors;
