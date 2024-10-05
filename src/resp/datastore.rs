@@ -1,7 +1,9 @@
 use lazy_static::lazy_static;
 use parking_lot::Mutex;
-use std::{collections::HashMap, time::Duration};
+use std::io::Read;
+use std::{collections::HashMap, fs::OpenOptions, io::Write, time::Duration};
 
+use crate::resp::constants::DATA_FILE_PATH;
 use crate::resp::errors::DataStoreError;
 
 lazy_static! {
@@ -40,6 +42,45 @@ pub fn set_value(key: String, value: String) -> Option<DataStoreError> {
             None
         }
     }
+}
+
+pub fn save() -> Result<(), DataStoreError> {
+    let data = DATA.try_lock_for(*OP_TIMEOUT_SECS);
+    match data {
+        None => {
+            eprintln!("Failed to acquire lock to save data");
+            Err(DataStoreError::LockError)
+        }
+        Some(data) => {
+            let json_data =
+                serde_json::to_string(&*data).map_err(|_| DataStoreError::SerializeError)?;
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(DATA_FILE_PATH)
+                .map_err(|_| DataStoreError::FileIOError)?;
+            file.write_all(json_data.as_bytes())
+                .map_err(|_| DataStoreError::FileIOError)?;
+            Ok(())
+        }
+    }
+}
+
+pub fn load() -> Result<(), DataStoreError> {
+    let mut file = OpenOptions::new()
+        .read(true)
+        .open(DATA_FILE_PATH)
+        .map_err(|_| DataStoreError::FileIOError)?;
+    let mut json_str = String::new();
+    file.read_to_string(&mut json_str)
+        .map_err(|_| DataStoreError::FileIOError)?;
+    let map: HashMap<String, String> =
+        serde_json::from_str(json_str.as_str()).map_err(|_| DataStoreError::DataLoadError)?;
+    let mut data = DATA
+        .try_lock_for(*OP_TIMEOUT_SECS)
+        .ok_or(DataStoreError::LockError)?;
+    *data = map;
+    Ok(())
 }
 
 #[cfg(test)]

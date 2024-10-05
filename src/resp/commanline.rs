@@ -21,7 +21,7 @@ pub fn handle_input_cmd(input: &str) {
         RedisCommand::Get => {
             if cmd.len() > 1 {
                 match get_value(cmd[1]) {
-                    Ok(value) => println!("{}\n", value),
+                    Ok(value) => println!("{}", value),
                     Err(e) => eprintln!("Failed to get value: {}", e),
                 }
             } else {
@@ -31,11 +31,12 @@ pub fn handle_input_cmd(input: &str) {
         RedisCommand::Set => {
             if cmd.len() > 2 {
                 match set_value(cmd[1].to_string(), cmd[2].to_string()) {
-                    None => println!("OK\n"),
+                    None => println!("OK"),
                     Some(e) => eprintln!("Failed to set value: {}", e),
                 }
+                save();
             } else {
-                println!("No key-value pair provided to PUT");
+                println!("No key-value pair provided to SET");
             }
         },
         _ => {

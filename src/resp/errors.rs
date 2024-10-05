@@ -24,6 +24,9 @@ impl Display for DeserializeError {
 pub enum DataStoreError {
     LockError,
     KeyNotFound,
+    SerializeError,
+    FileIOError,
+    DataLoadError,
 }
 
 impl Error for DataStoreError {}
@@ -33,6 +36,9 @@ impl Display for DataStoreError {
         match self {
             DataStoreError::LockError => write!(f, "Failed to acquire lock"),
             DataStoreError::KeyNotFound => write!(f, "Key not found"),
+            DataStoreError::SerializeError => write!(f, "Failed to serialize data"),
+            DataStoreError::FileIOError => write!(f, "Failed to read/write file"),
+            DataStoreError::DataLoadError => write!(f, "Failed to load data"),
         }
     }
     

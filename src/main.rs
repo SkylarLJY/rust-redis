@@ -3,8 +3,13 @@ mod resp;
 use std::io::{self, Write};
 
 use resp::commanline::handle_input_cmd;
+use resp::datastore;
 
-fn main() {
+fn main(){
+    let load_res = datastore::load();
+    if let Err(e) = load_res {
+        eprintln!("Failed to load data: {}", e);
+    }
     loop {
         print!("redis-cli> ");
         io::stdout().flush().unwrap();
@@ -24,4 +29,4 @@ fn main() {
             }
         }
     }
-}
+} 
