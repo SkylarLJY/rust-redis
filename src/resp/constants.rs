@@ -8,4 +8,4 @@ pub const NULL_ARRAY: &[u8] = b"*-1\r\n";
 
 pub const DATA_FILE_PATH: &'static str = ".data.json";
 pub const DATA_SAVE_INTERVAL_SECS: u64 = 5;
-pub const TCP_PORT: u16 = 6379;
+pub const CONFIG_FILE_PATH: &'static str = "redis.conf";

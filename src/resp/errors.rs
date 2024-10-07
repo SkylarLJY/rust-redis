@@ -47,10 +47,11 @@ impl Display for DataStoreError {
 pub enum ServerError {
     AcceptError,
     ReadError,
-    RespParseError,
+    RespParseError(String),
     TypeError,
     DataStoreError(DataStoreError),
     UserInputError(UserInputError),
+    ConfigError(String),
 }
 
 impl Error for ServerError {}
@@ -60,10 +61,11 @@ impl Display for ServerError {
         match self {
             ServerError::AcceptError => write!(f, "Failed to accept connection"),
             ServerError::ReadError => write!(f, "Failed to read from stream"),
-            ServerError::RespParseError => write!(f, "Failed to parse RESP"),
+            ServerError::RespParseError(s) => write!(f, "Failed to parse RESP {}", s),
             ServerError::TypeError => write!(f, "Type error"),
             ServerError::DataStoreError(e) => write!(f, "Data store error: {}", e),
             ServerError::UserInputError(e) => write!(f, "User input error: {}", e),
+            ServerError::ConfigError(e) => write!(f, "Config error: {}", e),
         }
     }
 }
@@ -72,7 +74,7 @@ impl Display for ServerError {
 pub enum UserInputError {
     InvalidInput(String),
     DataStoreError(DataStoreError),
-    UnknownCommand,
+    UnknownCommand(String),
 }
 
 impl Error for UserInputError {}
@@ -82,7 +84,7 @@ impl Display for UserInputError {
         match self {
             UserInputError::InvalidInput(s) => write!(f, "Invalid input: {}", s),
             UserInputError::DataStoreError(e) => write!(f, "Data store error: {}", e),
-            UserInputError::UnknownCommand => write!(f, "Unknown command"),
+            UserInputError::UnknownCommand(cmd) => write!(f, "Unknown command: {}", cmd),
         }
     }
 }

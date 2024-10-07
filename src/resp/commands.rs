@@ -1,11 +1,16 @@
-use super::{datastore::{get_value, set_value}, errors::UserInputError};
+use super::{
+    datastore::{get_value, set_value},
+    errors::UserInputError,
+    redisconfig,
+};
 
 pub enum RedisCommand {
     Ping,
     Echo,
     Get,
     Set,
-    Unknown,
+    Unknown(String),
+    Config,
 }
 
 impl RedisCommand {
@@ -15,36 +20,26 @@ impl RedisCommand {
             "echo" => RedisCommand::Echo,
             "get" => RedisCommand::Get,
             "set" => RedisCommand::Set,
-            _ => RedisCommand::Unknown,
-        }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            RedisCommand::Ping => "PING",
-            RedisCommand::Echo => "ECHO",
-            RedisCommand::Get => "GET",
-            RedisCommand::Set => "SET",
-            RedisCommand::Unknown => "UNKNOWN",
+            "config" => RedisCommand::Config,
+            _ => RedisCommand::Unknown(cmd.to_string()),
         }
     }
 }
 
 pub fn handle_input_cmd(input: Vec<&str>) -> Result<String, UserInputError> {
     let cmd = input;
-
     let resp_cmd = RedisCommand::from_str(cmd[0]);
     match resp_cmd {
-        RedisCommand::Ping => {
-            Ok("PONG".to_string())
-        },
+        RedisCommand::Ping => Ok("PONG".to_string()),
         RedisCommand::Echo => {
             if cmd.len() > 1 {
                 Ok(cmd[1..].join(""))
             } else {
-                Err(UserInputError::InvalidInput("No message provided to ECHO".to_string()))
+                Err(UserInputError::InvalidInput(
+                    "No message provided to ECHO".to_string(),
+                ))
             }
-        },
+        }
         RedisCommand::Get => {
             if cmd.len() > 1 {
                 match get_value(cmd[1]) {
@@ -52,9 +47,11 @@ pub fn handle_input_cmd(input: Vec<&str>) -> Result<String, UserInputError> {
                     Err(e) => Err(UserInputError::DataStoreError(e)),
                 }
             } else {
-                Err(UserInputError::InvalidInput("No key provided to GET".to_string()))
+                Err(UserInputError::InvalidInput(
+                    "No key provided to GET".to_string(),
+                ))
             }
-        },
+        }
         RedisCommand::Set => {
             if cmd.len() > 2 {
                 match set_value(cmd[1].to_string(), cmd[2].to_string()) {
@@ -62,12 +59,41 @@ pub fn handle_input_cmd(input: Vec<&str>) -> Result<String, UserInputError> {
                     Some(e) => Err(UserInputError::DataStoreError(e)),
                 }
             } else {
-                Err(UserInputError::InvalidInput("No key/value provided to SET".to_string()))
+                Err(UserInputError::InvalidInput(
+                    "No key/value provided to SET".to_string(),
+                ))
             }
-        },
-        _ => {
-            Err(UserInputError::UnknownCommand)
         }
+        RedisCommand::Config => {
+            match cmd.get(1) {
+                Some(action) if action.to_lowercase() == "get" => {
+                    let key = cmd.get(2).ok_or(UserInputError::InvalidInput(
+                        "No key provided for CONFIG GET".to_string(),
+                    ))?;
+                    match redisconfig::get_config(key) {
+                        Some(value) => Ok(value),
+                        None => Ok("".to_string()),
+                    }
+                }
+                Some(action) if action.to_lowercase() == "set" => {
+                    let key = cmd.get(2).ok_or(UserInputError::InvalidInput(
+                        "No key provided for CONFIG SET".to_string(),
+                    ))?;
+                    let val = cmd.get(3).ok_or(UserInputError::InvalidInput(
+                        "No value provided for CONFIG SET".to_string(),
+                    ))?;
+                    // TODO: set config value
+                    Ok("OK".to_string())
+                }
+                None => Err(UserInputError::InvalidInput(
+                    "No action provided for CONFIG command".to_string(),
+                )),
+                _ => Err(UserInputError::InvalidInput(format!(
+                    "Invalid action provided for CONFIG command: {}",
+                    cmd[1]
+                ))),
+            }
+        }
+        RedisCommand::Unknown(cmd) => Err(UserInputError::UnknownCommand(cmd)),
     }
 }
-
