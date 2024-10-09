@@ -1,7 +1,7 @@
 use super::{
     datastore::{get_value, set_value},
     errors::UserInputError,
-    redisconfig,
+    redisconfig, resp_value::RespType,
 };
 
 pub enum RedisCommand {
@@ -26,14 +26,15 @@ impl RedisCommand {
     }
 }
 
-pub fn handle_input_cmd(input: Vec<&str>) -> Result<String, UserInputError> {
+pub fn handle_input_cmd(input: Vec<&str>) -> Result<RespType, UserInputError> {
     let cmd = input;
     let resp_cmd = RedisCommand::from_str(cmd[0]);
+    println!("{:?}", cmd.join(" ").replace("\r\n", "\\r\\n"));
     match resp_cmd {
-        RedisCommand::Ping => Ok("PONG".to_string()),
+        RedisCommand::Ping => Ok(RespType::SimpleString("PONG".to_string())),
         RedisCommand::Echo => {
             if cmd.len() > 1 {
-                Ok(cmd[1..].join(""))
+                Ok(RespType::SimpleString(cmd[1..].join("")))
             } else {
                 Err(UserInputError::InvalidInput(
                     "No message provided to ECHO".to_string(),
@@ -43,7 +44,7 @@ pub fn handle_input_cmd(input: Vec<&str>) -> Result<String, UserInputError> {
         RedisCommand::Get => {
             if cmd.len() > 1 {
                 match get_value(cmd[1]) {
-                    Ok(value) => Ok(value),
+                    Ok(value) => Ok(RespType::SimpleString(value)),
                     Err(e) => Err(UserInputError::DataStoreError(e)),
                 }
             } else {
@@ -55,7 +56,7 @@ pub fn handle_input_cmd(input: Vec<&str>) -> Result<String, UserInputError> {
         RedisCommand::Set => {
             if cmd.len() > 2 {
                 match set_value(cmd[1].to_string(), cmd[2].to_string()) {
-                    None => Ok("OK".to_string()),
+                    None => Ok(RespType::SimpleString("OK".to_string())),
                     Some(e) => Err(UserInputError::DataStoreError(e)),
                 }
             } else {
@@ -71,8 +72,13 @@ pub fn handle_input_cmd(input: Vec<&str>) -> Result<String, UserInputError> {
                         "No key provided for CONFIG GET".to_string(),
                     ))?;
                     match redisconfig::get_config(key) {
-                        Some(value) => Ok(value),
-                        None => Ok("".to_string()),
+                        Some(value) => {
+                            let key_resp = RespType::BulkString(Some(key.as_bytes().to_vec()));
+                            let val_resp = RespType::BulkString(Some(value.as_bytes().to_vec()));
+                            let res_resp = RespType::Array(Some(vec![key_resp, val_resp]));
+                            Ok(res_resp)
+                        }
+                        None => Ok(RespType::Array(None)),
                     }
                 }
                 Some(action) if action.to_lowercase() == "set" => {
@@ -83,7 +89,7 @@ pub fn handle_input_cmd(input: Vec<&str>) -> Result<String, UserInputError> {
                         "No value provided for CONFIG SET".to_string(),
                     ))?;
                     // TODO: set config value
-                    Ok("OK".to_string())
+                    Ok(RespType::SimpleString("OK".to_string()))
                 }
                 None => Err(UserInputError::InvalidInput(
                     "No action provided for CONFIG command".to_string(),
