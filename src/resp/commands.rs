@@ -1,8 +1,11 @@
 use super::{
     datastore::{get_value, set_value},
     errors::UserInputError,
-    redisconfig, resp_value::RespType,
+    redisconfig,
+    resp_value::RespType,
 };
+use once_cell::sync::Lazy;
+use redis::{Client, Connection};
 
 pub enum RedisCommand {
     Ping,
@@ -101,5 +104,62 @@ pub fn handle_input_cmd(input: Vec<&str>) -> Result<RespType, UserInputError> {
             }
         }
         RedisCommand::Unknown(cmd) => Err(UserInputError::UnknownCommand(cmd)),
+    }
+}
+
+static mut REDIS_CONN: Lazy<Connection> = Lazy::new(|| {
+    let client = Client::open("redis://127.0.0.1/").expect("Failed to connect to redis");
+    client
+        .get_connection()
+        .expect("Failed to get redis connection")
+});
+
+#[cfg(test)]
+mod tests {
+    use std::str::from_utf8;
+
+    use redis::{ConnectionLike, Value};
+
+    use super::*;
+
+    fn redis_value_to_string(val: &Value) -> String {
+        println!("{:?}", val);
+        match val {
+            Value::SimpleString(s) => s.to_string(),
+            Value::BulkString(s) => {
+                from_utf8(s.as_slice()).expect("Failed to convert bulk string to string").to_string()
+            }
+            _ => panic!("Invalid response from redis"),
+        }
+    }
+
+    #[test]
+    fn test_get_config() {
+        let mut cmd = redis::cmd("CONFIG");
+        cmd.arg("GET").arg("save");
+        let redis_res =
+            unsafe { REDIS_CONN.req_packed_command(cmd.get_packed_command().as_slice()) }
+                .expect("ERR");
+
+        let rust_redis_res = handle_input_cmd(vec!["config", "get", "save"])
+            .expect("Failed to get config from rust redis");
+        match (redis_res, rust_redis_res) {
+            (Value::Array(arr1), RespType::Array(arr2)) => {
+                let key = redis_value_to_string(&arr1[0]);
+                let val = redis_value_to_string(&arr1[1]);
+                let arr2 = arr2.unwrap();
+                let rust_key = match &arr2[0] {
+                    RespType::BulkString(Some(bs)) => std::str::from_utf8(bs.as_slice()).unwrap(),
+                    _ => panic!("Invalid response from rust redis"),
+                };
+                let rust_val = match &arr2[1] {
+                    RespType::BulkString(Some(bs)) => std::str::from_utf8(bs.as_slice()).unwrap(),
+                    _ => panic!("Invalid response from rust redis"),
+                };
+                assert_eq!(key, rust_key);
+                assert_eq!(val, rust_val);
+            }
+            _ => panic!("Invalid response from redis"),
+        };
     }
 }
