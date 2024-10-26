@@ -27,6 +27,8 @@ pub enum DataStoreError {
     SerializeError,
     FileIOError,
     DataLoadError,
+    ExpiredKey,
+    InvalidInput(String),
 }
 
 impl Error for DataStoreError {}
@@ -39,6 +41,8 @@ impl Display for DataStoreError {
             DataStoreError::SerializeError => write!(f, "Failed to serialize data"),
             DataStoreError::FileIOError => write!(f, "Failed to read/write file"),
             DataStoreError::DataLoadError => write!(f, "Failed to load data"),
+            DataStoreError::ExpiredKey => write!(f, "Key has expired"),
+            DataStoreError::InvalidInput(s) => write!(f, "Invalid input: {}", s),
         }
     }
 }
