@@ -47,23 +47,59 @@ pub fn set_value(key: String, value: String, options: Vec<&str>) -> Option<DataS
         return Some(DataStoreError::LockError);
     }
 
-    // check if the key should expire
+    // parse options
     let exp = options
         .iter()
         .enumerate()
-        .find(|(i, x)| x.to_uppercase() == "EX");
-    let expire_at = match exp {
-        Some((i, _)) => {
-            if options.len() <= i + 1 {
-                eprintln!("No expire time provided");
-                return Some(DataStoreError::InvalidInput(
-                    "No expire time provided".to_string(),
-                ));
+        .find_map(|(i, x)| match x.to_uppercase().as_str() {
+            "EX" => {
+                if options.len() <= i + 1 {
+                    eprintln!("No expire time provided");
+                    return Some(Err(DataStoreError::InvalidInput(
+                        "No expire time provided".to_string(),
+                    )));
+                }
+                let duration = options[i + 1].parse::<u64>().unwrap();
+                let expire_date_time = Utc::now() + chrono::Duration::seconds(duration as i64);
+                Some(Ok(expire_date_time.timestamp()))
             }
-            let duration = options[i + 1].parse::<u64>().unwrap();
-            let expire_date_time = Utc::now() + chrono::Duration::seconds(duration as i64);
-            Some(expire_date_time.timestamp())
-        }
+            "PX" => {
+                if options.len() <= i + 1 {
+                    eprintln!("No expire time provided");
+                    return Some(Err(DataStoreError::InvalidInput(
+                        "No expire time provided".to_string(),
+                    )));
+                }
+                let duration = options[i + 1].parse::<u64>().unwrap();
+                let expire_date_time = Utc::now() + chrono::Duration::milliseconds(duration as i64);
+                Some(Ok(expire_date_time.timestamp()))
+            }
+            "EXAT" => {
+                if options.len() <= i + 1 {
+                    eprintln!("No expire time provided");
+                    return Some(Err(DataStoreError::InvalidInput(
+                        "No expire time provided".to_string(),
+                    )));
+                }
+                let expire_date_time = options[i + 1].parse::<i64>().unwrap();
+                Some(Ok(expire_date_time))
+            }
+            "PXAT" => {
+                if options.len() <= i + 1 {
+                    eprintln!("No expire time provided");
+                    return Some(Err(DataStoreError::InvalidInput(
+                        "No expire time provided".to_string(),
+                    )));
+                }
+                let expire_date_time = options[i + 1].parse::<i64>().unwrap();
+                Some(Ok(expire_date_time))
+            }
+            _ => None,
+        });
+
+    let expire_at = match exp {
+        Some(Ok(exp_date_time)) => Some(exp_date_time),
+        Some(Err(e)) => return Some(e),
         None => None,
     };
 
@@ -120,6 +156,8 @@ pub fn load() -> Result<(), DataStoreError> {
 
 #[cfg(test)]
 mod tests {
+    use serial_test::serial;
+
     use super::*;
 
     fn clear_data() {
@@ -127,6 +165,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_set_value() {
         clear_data();
         let key = "key".to_string();
@@ -137,6 +176,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_value() {
         clear_data();
         let key = "key".to_string();
@@ -148,6 +188,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_value_key_not_found() {
         clear_data();
         let key = "key".to_string();
@@ -157,6 +198,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_set_value_lock_error() {
         clear_data();
         let key = "key".to_string();
@@ -168,11 +210,13 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_expired_key() {
         clear_data();
         let key = "key".to_string();
         let value = "value".to_string();
         let result = set_value(key.clone(), value.clone(), vec!["EX", "1"]);
+        assert!(result.is_none());
         // wait for key to expire
         std::thread::sleep(Duration::from_secs(2));
         let result = get_value(&key);
