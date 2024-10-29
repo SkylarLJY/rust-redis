@@ -89,19 +89,19 @@ fn new_connection_handler(connection_stream: Result<TcpStream, std::io::Error>) 
                 Ok(res) => {
                     let resp_res = res.serialize();
                     s.write_all(&resp_res).unwrap();
-                    // s.flush().unwrap();
+                    s.flush().unwrap();
                 }
                 Err(e) => {
                     let error = e.to_string();
                     match e {
                         ServerError::ReadError => {
-                            eprintln!("{}", e);
+                            eprintln!("read error - {}", e);
                         }
                         ServerError::RespParseError(s) => {
-                            eprintln!("{}", s);
+                            eprintln!("Couldn't parse resp calue: {}", s);
                         }
                         ServerError::UserInputError(err) => {
-                            eprintln!("{}", err);
+                            eprintln!("user input error - {}", err);
                         }
                         ServerError::TypeError => {
                             eprintln!("Failed to handle user input: {}", e);

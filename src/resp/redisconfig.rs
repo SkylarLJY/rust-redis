@@ -12,7 +12,7 @@ lazy_static! {
     static ref REDIS_CONFIG: HashMap<String, String> = {
         let mut m = HashMap::new();
         m.insert("port".to_string(), "6379".to_string());
-        m.insert("save".to_string(), "".to_string());
+        m.insert("save".to_string(), "3600 1 300 100 60 10000".to_string());
         m.insert("appendonly".to_string(), "no".to_string());
         m
     };

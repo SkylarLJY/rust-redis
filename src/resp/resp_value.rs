@@ -8,6 +8,7 @@ pub enum RespType {
     BulkString(Option<Vec<u8>>),
     Array(Option<Vec<RespType>>),
     Quit,
+    Null,
 }
 
 impl RespType {
@@ -36,6 +37,7 @@ impl RespType {
                 }
             },
             RespType::Quit => b"".to_vec(),
+            RespType::Null => b"_\r\n".to_vec(),
         }
     }
 
@@ -59,6 +61,7 @@ impl RespType {
                 }
             },
             RespType::Quit => 0,
+            RespType::Null => 3,
         }
     }
 }

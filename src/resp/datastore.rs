@@ -9,6 +9,8 @@ use crate::resp::errors::DataStoreError;
 
 use serde_derive::{Deserialize, Serialize};
 
+use super::resp_value::RespType;
+
 #[derive(Serialize, Deserialize)]
 struct MapValue {
     value: String,
@@ -40,13 +42,18 @@ pub fn get_value(key: &str) -> Result<String, DataStoreError> {
     }
 }
 
-pub fn set_value(key: String, value: String, options: Vec<&str>) -> Option<DataStoreError> {
+pub fn set_value(
+    key: String,
+    value: String,
+    options: Vec<&str>,
+) -> Result<RespType, DataStoreError> {
     let data = DATA.try_lock_for(*OP_TIMEOUT_SECS);
     if data.is_none() {
         eprintln!("Failed to acquire lock to set value");
-        return Some(DataStoreError::LockError);
+        return Err(DataStoreError::LockError);
     }
 
+    let mut ttl = None;
     // parse options
     let exp = options
         .iter()
@@ -60,6 +67,7 @@ pub fn set_value(key: String, value: String, options: Vec<&str>) -> Option<DataS
                     )));
                 }
                 let duration = options[i + 1].parse::<u64>().unwrap();
+                ttl = Some(duration);
                 let expire_date_time = Utc::now() + chrono::Duration::seconds(duration as i64);
                 Some(Ok(expire_date_time.timestamp()))
             }
@@ -71,6 +79,7 @@ pub fn set_value(key: String, value: String, options: Vec<&str>) -> Option<DataS
                     )));
                 }
                 let duration = options[i + 1].parse::<u64>().unwrap();
+                ttl = Some(duration);
                 let expire_date_time = Utc::now() + chrono::Duration::milliseconds(duration as i64);
                 Some(Ok(expire_date_time.timestamp()))
             }
@@ -99,18 +108,41 @@ pub fn set_value(key: String, value: String, options: Vec<&str>) -> Option<DataS
 
     let expire_at = match exp {
         Some(Ok(exp_date_time)) => Some(exp_date_time),
-        Some(Err(e)) => return Some(e),
+        Some(Err(e)) => return Err(e),
         None => None,
     };
+
+    let nx = options.iter().find(|x| x.to_uppercase() == "NX");
+    let xx = options.iter().find(|x| x.to_uppercase() == "XX");
+    let keepttl = options.iter().find(|x| x.to_uppercase() == "KEEPTTL");
+    let get = options.iter().find(|x| x.to_uppercase() == "GET");
 
     match data {
         None => {
             eprintln!("Failed to acquire lock to set value");
-            Some(DataStoreError::LockError)
+            Err(DataStoreError::LockError)
         }
         Some(mut d) => {
+            // TODO: handle keepttl
+            let mut final_res = RespType::SimpleString("OK".to_string());
+            if nx.is_some() && xx.is_some() {
+                return Ok(RespType::Error("Syntax error".to_string()));
+            }
+            // nx - set if not already exists
+            // xx - only set if already exists
+            if (nx.is_some() && d.contains_key(key.as_str()))
+                || (xx.is_some() && !d.contains_key(key.as_str()))
+            {
+                return Ok(RespType::Null);
+            }
+            if get.is_some() {
+                final_res = match d.get(key.as_str()) {
+                    Some(v) => RespType::BulkString(Some(v.value.clone().into_bytes())),
+                    None => RespType::Null,
+                }
+            }
             d.insert(key, MapValue { value, expire_at });
-            None
+            Ok(final_res)
         }
     }
 }
@@ -172,7 +204,7 @@ mod tests {
         let value = "value".to_string();
 
         let result = set_value(key.clone(), value.clone(), vec![]);
-        assert_eq!(result, None);
+        assert_eq!(result, Ok(RespType::SimpleString("OK".to_string())));
     }
 
     #[test]
@@ -206,7 +238,7 @@ mod tests {
 
         let lock = DATA.lock();
         let result = set_value(key.clone(), value.clone(), vec![]);
-        assert_eq!(result, Some(DataStoreError::LockError));
+        assert_eq!(result, Err(DataStoreError::LockError));
     }
 
     #[test]
@@ -216,7 +248,7 @@ mod tests {
         let key = "key".to_string();
         let value = "value".to_string();
         let result = set_value(key.clone(), value.clone(), vec!["EX", "1"]);
-        assert!(result.is_none());
+        assert!(result.is_ok());
         // wait for key to expire
         std::thread::sleep(Duration::from_secs(2));
         let result = get_value(&key);

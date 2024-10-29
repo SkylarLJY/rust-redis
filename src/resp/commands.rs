@@ -32,7 +32,7 @@ impl RedisCommand {
 pub fn handle_input_cmd(input: Vec<&str>) -> Result<RespType, UserInputError> {
     let cmd = input;
     let resp_cmd = RedisCommand::from_str(cmd[0]);
-    println!("{:?}", cmd.join(" ").replace("\r\n", "\\r\\n"));
+    // println!("{:?}", cmd.join(" ").replace("\r\n", "\\r\\n"));
     match resp_cmd {
         RedisCommand::Ping => Ok(RespType::SimpleString("PONG".to_string())),
         RedisCommand::Echo => {
@@ -58,9 +58,9 @@ pub fn handle_input_cmd(input: Vec<&str>) -> Result<RespType, UserInputError> {
         }
         RedisCommand::Set => {
             if cmd.len() > 2 {
-                match set_value(cmd[1].to_string(), cmd[2].to_string()) {
-                    None => Ok(RespType::SimpleString("OK".to_string())),
-                    Some(e) => Err(UserInputError::DataStoreError(e)),
+                match set_value(cmd[1].to_string(), cmd[2].to_string(), cmd[3..].to_vec()) {
+                   Ok(resp) => Ok(resp),
+                     Err(e) => Err(UserInputError::DataStoreError(e)),
                 }
             } else {
                 Err(UserInputError::InvalidInput(
@@ -107,6 +107,8 @@ pub fn handle_input_cmd(input: Vec<&str>) -> Result<RespType, UserInputError> {
     }
 }
 
+// ===== tests =====
+
 static mut REDIS_CONN: Lazy<Connection> = Lazy::new(|| {
     let client = Client::open("redis://127.0.0.1/").expect("Failed to connect to redis");
     client
@@ -118,16 +120,23 @@ static mut REDIS_CONN: Lazy<Connection> = Lazy::new(|| {
 mod tests {
     use std::str::from_utf8;
 
-    use redis::{ConnectionLike, Value};
+    use redis::Value;
 
     use super::*;
 
     fn redis_value_to_string(val: &Value) -> String {
-        println!("{:?}", val);
         match val {
             Value::SimpleString(s) => s.to_string(),
-            Value::BulkString(s) => {
-                from_utf8(s.as_slice()).expect("Failed to convert bulk string to string").to_string()
+            Value::BulkString(s) => from_utf8(s.as_slice())
+                .expect("Failed to convert bulk string to string")
+                .to_string(),
+            Value::Array(arr) => {
+                let mut res = String::new();
+                for v in arr.iter() {
+                    res.push_str(&redis_value_to_string(v));
+                    res.push_str(" ");
+                }
+                res
             }
             _ => panic!("Invalid response from redis"),
         }
@@ -137,9 +146,7 @@ mod tests {
     fn test_get_config() {
         let mut cmd = redis::cmd("CONFIG");
         cmd.arg("GET").arg("save");
-        let redis_res =
-            unsafe { REDIS_CONN.req_packed_command(cmd.get_packed_command().as_slice()) }
-                .expect("ERR");
+        let redis_res: Value = cmd.query(unsafe { &mut REDIS_CONN }).expect("ERR");
 
         let rust_redis_res = handle_input_cmd(vec!["config", "get", "save"])
             .expect("Failed to get config from rust redis");
@@ -161,5 +168,9 @@ mod tests {
             }
             _ => panic!("Invalid response from redis"),
         };
+    }
+
+    #[test]
+    fn test_set_with_expire() {
     }
 }
