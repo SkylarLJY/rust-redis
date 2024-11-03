@@ -7,7 +7,8 @@ use resp::constants::DATA_SAVE_INTERVAL_SECS;
 use resp::datastore;
 use resp::server::run_server;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let load_res = datastore::load();
     if let Err(e) = load_res {
         eprintln!("Failed to load data: {}", e);
@@ -18,7 +19,7 @@ fn main() {
         datastore::save().unwrap_or_else(|e| eprintln!("Failed to save data: {}", e));
     });
 
-    match run_server() {
+    match run_server().await {
         Ok(_) => println!("Server stopped"),
         Err(e) => eprintln!("Server failed: {}", e),
     }

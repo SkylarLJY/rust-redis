@@ -1,8 +1,8 @@
-use std::{
-    io::{Read, Write},
-    net::{SocketAddr, TcpListener, TcpStream},
-    thread,
-    time::Duration,
+use std::net::SocketAddr;
+
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt, Error},
+    net::{TcpListener, TcpStream},
 };
 
 use crate::resp::{
@@ -11,31 +11,43 @@ use crate::resp::{
 
 use super::errors::ServerError;
 
-pub fn run_server() -> Result<(), ServerError> {
+pub async fn run_server() -> Result<(), Error> {
     let port = redisconfig::get_config("port")
         .unwrap_or("6379".to_string())
         .parse()
         .unwrap();
     let socket_sddr = SocketAddr::from(([127, 0, 0, 1], port));
-    let listener = TcpListener::bind(socket_sddr).map_err(|_| ServerError::AcceptError)?;
+    // let listener = TcpListener::bind(socket_sddr).map_err(|_| ServerError::AcceptError)?;
+    let listener = TcpListener::bind(socket_sddr).await?;
     println!("Server listening on port {}", port);
     loop {
-        for stream in listener.incoming() {
-            thread::spawn(|| {
-                new_connection_handler(stream);
-            });
+        let (stream, _) = listener.accept().await?;
+        match process(stream).await {
+            Ok(_) => {}
+            Err(e) => eprintln!("Error processing stream: {}", e),
         }
     }
 }
 
-fn read_stream(stream: &mut std::net::TcpStream) -> Result<Vec<u8>, std::io::Error> {
-    let mut buf = [4; 1024];
-    stream.set_read_timeout(Some(Duration::from_secs(1)))?;
-    let stream_read_res: usize = stream.read(&mut buf)?;
-    if stream_read_res == 0 {
-        return Ok(vec![]);
+async fn process(mut stream: TcpStream) -> Result<(), ServerError> {
+    stream.readable().await.unwrap();
+
+    let mut buf = [0u8; 1024];
+    let content_len = stream
+        .read(&mut buf)
+        .await
+        .map_err(|_| ServerError::ReadError)?;
+    if content_len == 0 {
+        return Ok(());
     }
-    Ok(buf.to_vec())
+
+    let input_arr = deserialize_array(&buf[..content_len]).map_err(|_| {
+        ServerError::RespParseError("Failed to deserialize input array".to_string())
+    })?;
+    let res = reply(input_arr)?;
+
+    stream.write(&res.serialize()).await.unwrap();
+    Ok(())
 }
 
 fn byte_vec_to_string(byte_vec: Vec<u8>) -> String {
@@ -48,81 +60,28 @@ fn byte_vec_to_string(byte_vec: Vec<u8>) -> String {
     }
 }
 
-fn reply(mut s: &mut TcpStream) -> Result<RespType, ServerError> {
-    let input_byte = read_stream(&mut s).map_err(|_| ServerError::ReadError)?;
-    // no more data instream indicates user has quited connection
-    if input_byte.is_empty() {
-        return Ok(RespType::Quit);
-    }
-    let input_array = deserialize_array(input_byte.as_slice())
-        .map_err(|_| ServerError::RespParseError(byte_vec_to_string(input_byte)))?;
-    match input_array {
+fn reply(arr: RespType) -> Result<RespType, ServerError> {
+    match arr {
         RespType::Array(arr) => {
+            if arr.is_none() {
+                return Ok(RespType::Array(None));
+            }
             let bulk_string_arr = arr.unwrap();
             if bulk_string_arr.len() == 0 {
                 // TODO: handle empty array
                 return Ok(RespType::SimpleString("".to_string()));
             }
 
-            let byte_arr: Vec<&str> = bulk_string_arr
+            let str_arr: Vec<&str> = bulk_string_arr
                 .iter()
                 .map(|bs| match bs {
                     RespType::BulkString(Some(bs)) => std::str::from_utf8(bs.as_slice()).unwrap(),
                     _ => "",
                 })
                 .collect();
-            let res = handle_input_cmd(byte_arr).map_err(|e| ServerError::UserInputError(e))?;
+            let res = handle_input_cmd(str_arr).map_err(|e| ServerError::UserInputError(e))?;
             Ok(res)
         }
         _ => Err(ServerError::TypeError),
     }
-}
-
-fn new_connection_handler(connection_stream: Result<TcpStream, std::io::Error>) {
-    match connection_stream {
-        Ok(mut s) => loop {
-            let res = reply(&mut s);
-            match res {
-                Ok(RespType::Quit) => {
-                    break;
-                }
-                Ok(res) => {
-                    let resp_res = res.serialize();
-                    s.write_all(&resp_res).unwrap();
-                    s.flush().unwrap();
-                }
-                Err(e) => {
-                    let error = e.to_string();
-                    match e {
-                        ServerError::ReadError => {
-                            eprintln!("read error - {}", e);
-                        }
-                        ServerError::RespParseError(s) => {
-                            eprintln!("Couldn't parse resp calue: {}", s);
-                        }
-                        ServerError::UserInputError(err) => {
-                            eprintln!("user input error - {}", err);
-                        }
-                        ServerError::TypeError => {
-                            eprintln!("Failed to handle user input: {}", e);
-                        }
-                        _ => {
-                            eprintln!("Failed to reply request: {}", e);
-                        }
-                    };
-                    let error = RespType::Error(error).serialize();
-                    match s.write_all(error.as_slice()) {
-                        Ok(_) => (),
-                        Err(e) => {
-                            eprintln!("Failed to write error to stream: {}", e);
-                            break;
-                        }
-                    }
-                }
-            }
-        },
-        Err(e) => {
-            eprintln!("Failed to accept connection: {}", e);
-        }
-    };
 }
