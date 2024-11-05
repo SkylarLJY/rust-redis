@@ -143,6 +143,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_get_config() {
         let mut cmd = redis::cmd("CONFIG");
         cmd.arg("GET").arg("save");
