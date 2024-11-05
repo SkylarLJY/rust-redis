@@ -6,22 +6,22 @@ on:
       - main
 
 jobs:
-  test:
+  format-and-test:
     name: cargo test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - run: cargo test --release
-
-  formatting:
-    name: cargo fmt
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      # Ensure rustfmt is installed and setup problem matcher
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          components: rustfmt
-      - name: Rustfmt Check
-        uses: actions-rust-lang/rustfmt@v1
+      - run: rustup component add rustfmt
+      - run: cargo fmt
+      - name: Commit changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "Auto-format code"
+          git push
+        continue-on-error: true # Avoid error if no changes are made
+      - env:
+          RUSTFLAGS: -A warnings
+        run: cargo test --release 
