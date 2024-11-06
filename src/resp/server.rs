@@ -1,8 +1,9 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, Error},
     net::{TcpListener, TcpStream},
+    time::timeout,
 };
 
 use crate::resp::{
@@ -17,46 +18,54 @@ pub async fn run_server() -> Result<(), Error> {
         .parse()
         .unwrap();
     let socket_sddr = SocketAddr::from(([127, 0, 0, 1], port));
-    // let listener = TcpListener::bind(socket_sddr).map_err(|_| ServerError::AcceptError)?;
     let listener = TcpListener::bind(socket_sddr).await?;
     println!("Server listening on port {}", port);
     loop {
-        let (stream, _) = listener.accept().await?;
-        match process(stream).await {
-            Ok(_) => {}
-            Err(e) => eprintln!("Error processing stream: {}", e),
-        }
+        let (stream, _) = listener.accept().await.unwrap();
+        tokio::spawn(async move {
+            process(stream).await;
+        });
     }
 }
 
-async fn process(mut stream: TcpStream) -> Result<(), ServerError> {
-    stream.readable().await.unwrap();
-
-    let mut buf = [0u8; 1024];
-    let content_len = stream
-        .read(&mut buf)
-        .await
-        .map_err(|_| ServerError::ReadError)?;
-    if content_len == 0 {
-        return Ok(());
-    }
-
-    let input_arr = deserialize_array(&buf[..content_len]).map_err(|_| {
-        ServerError::RespParseError("Failed to deserialize input array".to_string())
-    })?;
-    let res = reply(input_arr)?;
-
-    stream.write(&res.serialize()).await.unwrap();
-    Ok(())
-}
-
-fn byte_vec_to_string(byte_vec: Vec<u8>) -> String {
-    match String::from_utf8(byte_vec.clone()) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Failed to convert byte vec to string: {}", e);
-            "ERR".to_string()
+pub async fn process(mut stream: TcpStream) {
+    // use loop to continue processing requests from the same client
+    loop {
+        // put a timeout on the read operation
+        let stream_ready = timeout(Duration::from_secs(1), stream.readable());
+        match stream_ready.await {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => {
+                eprintln!("Failed to check if stream is readable: {}", e);
+                break;
+            }
+            Err(_) => {
+                println!("Timeout waiting for data");
+                break;
+            }
+        };
+        let mut buf = [0u8; 1024];
+        let content_len = match stream.read(&mut buf).await {
+            Ok(content_len) => content_len,
+            Err(e) => {
+                eprintln!("Failed to read from stream: {}", e);
+                0
+            }
+        };
+        if content_len == 0 {
+            break;
         }
+
+        let input_arr = deserialize_array(&buf[..content_len])
+            .map_err(|_| {
+                ServerError::RespParseError("Failed to deserialize input array".to_string())
+            })
+            .unwrap();
+        let res = reply(input_arr).unwrap();
+
+        stream.writable().await.unwrap();
+        stream.write(&res.serialize()).await.unwrap();
+        stream.flush().await.unwrap();
     }
 }
 
@@ -64,7 +73,7 @@ fn reply(arr: RespType) -> Result<RespType, ServerError> {
     match arr {
         RespType::Array(arr) => {
             if arr.is_none() {
-                return Ok(RespType::Array(None));
+                return Ok(RespType::Null);
             }
             let bulk_string_arr = arr.unwrap();
             if bulk_string_arr.len() == 0 {
