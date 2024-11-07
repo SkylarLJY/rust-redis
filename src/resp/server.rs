@@ -84,7 +84,7 @@ fn reply(arr: RespType) -> Result<RespType, ServerError> {
             let str_arr: Vec<&str> = bulk_string_arr
                 .iter()
                 .map(|bs| match bs {
-                    RespType::BulkString(Some(bs)) => std::str::from_utf8(bs.as_slice()).unwrap(),
+                    RespType::BulkString(Some(bs)) => std::str::from_utf8(bs).unwrap(),
                     _ => "",
                 })
                 .collect();

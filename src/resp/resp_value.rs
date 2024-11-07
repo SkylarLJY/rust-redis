@@ -1,3 +1,5 @@
+use bytes::Bytes;
+
 use super::constants::{NULL_ARRAY, NULL_BULK_STRING};
 
 #[derive(Debug, PartialEq)]
@@ -5,9 +7,8 @@ pub enum RespType {
     SimpleString(String),
     Error(String),
     Integer(i64),
-    BulkString(Option<Vec<u8>>),
+    BulkString(Option<Bytes>),
     Array(Option<Vec<RespType>>),
-    Quit,
     Null,
 }
 
@@ -36,7 +37,6 @@ impl RespType {
                     res
                 }
             },
-            RespType::Quit => b"".to_vec(),
             RespType::Null => b"_\r\n".to_vec(),
         }
     }
@@ -47,11 +47,11 @@ impl RespType {
             RespType::Error(e) => e.len() + 3,
             RespType::Integer(i) => i.to_string().len() + 3,
             RespType::BulkString(b) => match b {
-                None => NULL_BULK_STRING.len(), 
+                None => NULL_BULK_STRING.len(),
                 Some(b) => b.len() + 5 + b.len().to_string().len(), // ${len}\r\n{content}\r\n
             },
             RespType::Array(a) => match a {
-                None => NULL_ARRAY.len(), 
+                None => NULL_ARRAY.len(),
                 Some(a) => {
                     let mut res = 3 + a.len().to_string().len(); // *{len}\r\n
                     for e in a {
@@ -60,7 +60,6 @@ impl RespType {
                     res
                 }
             },
-            RespType::Quit => 0,
             RespType::Null => 3,
         }
     }
@@ -104,8 +103,8 @@ mod tests {
     #[test]
     fn test_serialize_array_of_bulk_string() {
         let input = RespType::Array(Some(vec![
-            RespType::BulkString(Some("foo".to_string().into_bytes())),
-            RespType::BulkString(Some("bar".to_string().into_bytes())),
+            RespType::BulkString(Some("foo".to_string().into())),
+            RespType::BulkString(Some("bar".to_string().into())),
         ]));
         let expected = b"*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n";
         assert_eq!(input.serialize(), expected);
