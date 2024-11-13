@@ -1,5 +1,4 @@
 use chrono::{DateTime, Utc};
-use lazy_static::lazy_static;
 use parking_lot::Mutex;
 use std::io::Read;
 use std::{collections::HashMap, fs::OpenOptions, io::Write, time::Duration};

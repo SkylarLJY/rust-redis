@@ -617,6 +617,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "chrono",
+ "lazy_static",
  "mini-redis",
  "once_cell",
  "parking_lot",

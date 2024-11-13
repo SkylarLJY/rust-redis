@@ -1,6 +1,8 @@
+use bytes::Bytes;
+
 use super::constants::*;
-use super::resp_value::RespType;
 use super::errors::DeserializeError;
+use super::resp_value::RespType;
 
 // return (RespType, number of bytes consumed)
 pub fn deserialize(input: &[u8]) -> Result<(RespType, usize), DeserializeError> {
@@ -26,7 +28,12 @@ pub fn deserialize(input: &[u8]) -> Result<(RespType, usize), DeserializeError> 
             res = deserialize_array(input);
         }
         None => return Err(DeserializeError::EmptyInput),
-        Some(_) => return Err(DeserializeError::InvalidInput(format!("Invalid input: {:?}", input))),
+        Some(_) => {
+            return Err(DeserializeError::InvalidInput(format!(
+                "Invalid input: {:?}",
+                input
+            )))
+        }
     }
     if res.is_err() {
         return Err(res.err().unwrap());
@@ -39,28 +46,36 @@ pub fn deserialize(input: &[u8]) -> Result<(RespType, usize), DeserializeError> 
 
 pub fn deserialize_bulk_string(input: &[u8]) -> Result<RespType, DeserializeError> {
     if input.len() < 4 || input[0] != BULK_STRING_PREFIX {
-        return Err(DeserializeError::InvalidInput(format!("Invalid input: {:?}", input)));
+        return Err(DeserializeError::InvalidInput(format!(
+            "Invalid input: {:?}",
+            input
+        )));
     }
     if input.len() == NULL_BULK_STRING.len() && input[1] == b'-' && input[2] == b'1' {
         return Ok(RespType::BulkString(None));
     }
-    let (len, content_start_idx) = match get_length_and_content_start_idx(input){
+    let (len, content_start_idx) = match get_length_and_content_start_idx(input) {
         Ok((len, content_start_idx)) => (len, content_start_idx),
         Err(e) => return Err(e),
     };
 
-    let content = &input[content_start_idx..content_start_idx + len];
+    let content = input[content_start_idx..content_start_idx + len].to_vec();
     // check if content is at the end and followed by CRLF
     if input[content_start_idx + len] != b'\r' || input[content_start_idx + len + 1] != b'\n' {
-        return Err(DeserializeError::LengthMismatch("Bulk string length does not match content length".to_string()));
+        return Err(DeserializeError::LengthMismatch(
+            "Bulk string length does not match content length".to_string(),
+        ));
     }
 
-    Ok(RespType::BulkString(Some(content.to_vec())))
+    Ok(RespType::BulkString(Some(Bytes::from(content))))
 }
 
 pub fn deserialize_array(input: &[u8]) -> Result<RespType, DeserializeError> {
     if input.len() < 4 || input[0] != ARRAY_PREFIX {
-        return Err(DeserializeError::InvalidInput(format!("Invalid input: {:?}", input)));
+        return Err(DeserializeError::InvalidInput(format!(
+            "Invalid input: {:?}",
+            input
+        )));
     }
     if input.len() == NULL_ARRAY.len() && input[1] == b'-' && input[2] == b'1' {
         return Ok(RespType::Array(None));
@@ -73,16 +88,17 @@ pub fn deserialize_array(input: &[u8]) -> Result<RespType, DeserializeError> {
     // for now parse all elements at once. May switch to lazy parsing in the future
     let mut content: Vec<RespType> = Vec::with_capacity(len);
     for _ in 0..len {
-        match deserialize(&input[content_start_idx..]){
+        match deserialize(&input[content_start_idx..]) {
             Err(e) => {
-                match e{
+                match e {
                     DeserializeError::EmptyInput => {
-                        return Err(DeserializeError::InvalidInput("Array length value larger than actual length".to_string()));
-                    },
+                        return Err(DeserializeError::InvalidInput(
+                            "Array length value larger than actual length".to_string(),
+                        ));
+                    }
                     _ => return Err(e),
                 };
-
-            },
+            }
             Ok((elem, bytes_consumed)) => {
                 content.push(elem);
                 content_start_idx += bytes_consumed;
@@ -95,15 +111,30 @@ pub fn deserialize_array(input: &[u8]) -> Result<RespType, DeserializeError> {
 fn get_length_and_content_start_idx(input: &[u8]) -> Result<(usize, usize), DeserializeError> {
     let crlf_idx = match input.iter().position(|&c| c == b'\r') {
         Some(idx) => idx,
-        None => return Err(DeserializeError::InvalidInput(format!("Failed to find crlf in input: {:?}", input))),
+        None => {
+            return Err(DeserializeError::InvalidInput(format!(
+                "Failed to find crlf in input: {:?}",
+                input
+            )))
+        }
     };
     let len_str = match std::str::from_utf8(&input[1..crlf_idx]) {
         Ok(s) => s,
-        Err(_) => return Err(DeserializeError::InvalidInput(format!("Failed to parse length string into utf8 string: {:?}", &input[1..crlf_idx]))),
+        Err(_) => {
+            return Err(DeserializeError::InvalidInput(format!(
+                "Failed to parse length string into utf8 string: {:?}",
+                &input[1..crlf_idx]
+            )))
+        }
     };
     let len: usize = match len_str.parse() {
         Ok(n) => n,
-        Err(_) => return Err(DeserializeError::InvalidInput(format!("Failed to parse length string into integer: {:?}", len_str))),
+        Err(_) => {
+            return Err(DeserializeError::InvalidInput(format!(
+                "Failed to parse length string into integer: {:?}",
+                len_str
+            )))
+        }
     };
     Ok((len, crlf_idx + 2))
 }
@@ -155,8 +186,8 @@ mod tests {
         fn test_deserialize_array_of_bulk_string() {
             let input = b"*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n";
             let expected = RespType::Array(Some(vec![
-                RespType::BulkString(Some("foo".to_string().into_bytes())),
-                RespType::BulkString(Some("bar".to_string().into_bytes())),
+                RespType::BulkString(Some(Bytes::from("foo"))),
+                RespType::BulkString(Some(Bytes::from("bar"))),
             ]));
             assert_eq!(deserialize(input).unwrap(), (expected, input.len()));
         }
@@ -180,7 +211,7 @@ mod tests {
         #[test]
         fn test_deserialize_bulk_string_with_newline() {
             let input = b"$8\r\nfoo\r\nbar\r\n";
-            let expected = RespType::BulkString(Some("foo\r\nbar".to_string().into_bytes()));
+            let expected = RespType::BulkString(Some(Bytes::from("foo\r\nbar")));
             assert_eq!(deserialize(input).unwrap(), (expected, input.len()));
         }
 
@@ -189,7 +220,7 @@ mod tests {
             let input = b"*3\r\n+foo\r\n$3\r\nbar\r\n:42\r\n";
             let expected = RespType::Array(Some(vec![
                 RespType::SimpleString("foo".to_string()),
-                RespType::BulkString(Some("bar".to_string().into_bytes())),
+                RespType::BulkString(Some(Bytes::from("bar"))),
                 RespType::Integer(42),
             ]));
             assert_eq!(deserialize(input).unwrap(), (expected, input.len()));
@@ -204,14 +235,22 @@ mod tests {
             let input = b"$3\r\nfooooooo\r\n";
             let res = deserialize(input);
             assert!(res.is_err());
-            assert_eq!(res.err().unwrap(), DeserializeError::LengthMismatch("Bulk string length does not match content length".to_string()));
+            assert_eq!(
+                res.err().unwrap(),
+                DeserializeError::LengthMismatch(
+                    "Bulk string length does not match content length".to_string()
+                )
+            );
         }
         #[test]
         fn test_deserialize_invalid_input() {
             let input = b"!foo\r\n";
             let res = deserialize(input);
             assert!(res.is_err());
-            assert_eq!(res.err().unwrap(), DeserializeError::InvalidInput(format!("Invalid input: {:?}", input)));
+            assert_eq!(
+                res.err().unwrap(),
+                DeserializeError::InvalidInput(format!("Invalid input: {:?}", input))
+            );
         }
 
         #[test]
@@ -220,10 +259,11 @@ mod tests {
             let res = deserialize(input);
             assert!(res.is_err());
             match res.err().unwrap() {
-                DeserializeError::InvalidInput(s) => assert_eq!(s, "Array length value larger than actual length"),
+                DeserializeError::InvalidInput(s) => {
+                    assert_eq!(s, "Array length value larger than actual length")
+                }
                 _ => panic!("Unexpected error type"),
             }
         }
-
     }
 }

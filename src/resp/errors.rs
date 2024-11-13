@@ -1,5 +1,8 @@
 use core::fmt;
-use std::{error::Error, fmt::{Display, Formatter}};
+use std::{
+    error::Error,
+    fmt::{Display, Formatter},
+};
 
 #[derive(Debug, PartialEq)]
 pub enum DeserializeError {
@@ -82,7 +85,7 @@ pub enum UserInputError {
 }
 
 impl Error for UserInputError {}
-    
+
 impl Display for UserInputError {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
@@ -92,4 +95,3 @@ impl Display for UserInputError {
         }
     }
 }
-

@@ -7,7 +7,7 @@ use std::{
 
 use super::{constants::CONFIG_FILE_PATH, errors::ServerError};
 
-// TODO: parse config file 
+// TODO: parse config file
 lazy_static! {
     static ref REDIS_CONFIG: HashMap<String, String> = {
         let mut m = HashMap::new();
@@ -26,13 +26,12 @@ pub fn parse_config_file() -> Option<ServerError> {
         if line.starts_with('#') {
             continue;
         }
-        let (k, v) = line.split_once(" ").unwrap();
+        // let (k, v) = line.split_once(" ").unwrap();
         // unsafe { REDIS_CONFIG.insert(k.to_string(), v.to_string()) };
     }
     None
 }
 
 pub fn get_config(key: &str) -> Option<String> {
-    unsafe { REDIS_CONFIG.get(key).cloned() }
+    REDIS_CONFIG.get(key).cloned()
 }
-

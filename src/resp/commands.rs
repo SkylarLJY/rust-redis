@@ -1,7 +1,6 @@
 use super::{
     datastore::{get_value, set_value},
     errors::UserInputError,
-    redisconfig,
     resp_value::RespType,
 };
 use once_cell::sync::Lazy;
@@ -9,44 +8,50 @@ use redis::{Client, Connection};
 
 pub enum RedisCommand {
     Ping,
-    Echo,
-    Get,
-    Set,
+    Echo(String),
+    Get(String),
+    Set(String, String, Vec<String>), // key, value, options
     Unknown(String),
-    Config,
+    Config(Vec<String>),
 }
 
 impl RedisCommand {
-    pub fn from_str(cmd: &str) -> Self {
-        match cmd.to_lowercase().as_str() {
+    pub fn from_str(cmd: Vec<&str>) -> Self {
+        match cmd.get(0).unwrap().to_lowercase().as_str() {
             "ping" => RedisCommand::Ping,
-            "echo" => RedisCommand::Echo,
-            "get" => RedisCommand::Get,
-            "set" => RedisCommand::Set,
-            "config" => RedisCommand::Config,
-            _ => RedisCommand::Unknown(cmd.to_string()),
+            "echo" => RedisCommand::Echo(cmd.get(1).unwrap_or(&"").to_string()),
+            "get" => RedisCommand::Get(cmd.get(1).unwrap_or(&"").to_string()),
+            "set" => RedisCommand::Set(
+                cmd.get(1).unwrap_or(&"").to_string(),
+                cmd.get(2).unwrap_or(&"").to_string(),
+                cmd[3..].to_vec().iter().map(|x| x.to_string()).collect(),
+            ),
+            "config" => {
+                RedisCommand::Config(cmd[1..].to_vec().iter().map(|x| x.to_string()).collect())
+            }
+            _ => RedisCommand::Unknown(cmd.join(" ")),
         }
     }
 }
 
-pub fn handle_input_cmd(input: Vec<&str>) -> Result<RespType, UserInputError> {
-    let cmd = input;
-    let resp_cmd = RedisCommand::from_str(cmd[0]);
+pub fn handle_input_cmd(cmd: Vec<&str>) -> Result<RespType, UserInputError> {
+    let resp_cmd = RedisCommand::from_str(cmd);
     // println!("{:?}", cmd.join(" ").replace("\r\n", "\\r\\n"));
+
     match resp_cmd {
         RedisCommand::Ping => Ok(RespType::SimpleString("PONG".to_string())),
-        RedisCommand::Echo => {
-            if cmd.len() > 1 {
-                Ok(RespType::SimpleString(cmd[1..].join("")))
+        RedisCommand::Echo(s) => {
+            if s.len() > 0 {
+                Ok(RespType::SimpleString(s))
             } else {
                 Err(UserInputError::InvalidInput(
                     "No message provided to ECHO".to_string(),
                 ))
             }
         }
-        RedisCommand::Get => {
-            if cmd.len() > 1 {
-                match get_value(cmd[1]) {
+        RedisCommand::Get(key) => {
+            if key.len() > 0 {
+                match get_value(&key) {
                     Ok(value) => Ok(RespType::SimpleString(value)),
                     Err(e) => Err(UserInputError::DataStoreError(e)),
                 }
@@ -56,11 +61,11 @@ pub fn handle_input_cmd(input: Vec<&str>) -> Result<RespType, UserInputError> {
                 ))
             }
         }
-        RedisCommand::Set => {
-            if cmd.len() > 2 {
-                match set_value(cmd[1].to_string(), cmd[2].to_string(), cmd[3..].to_vec()) {
-                   Ok(resp) => Ok(resp),
-                     Err(e) => Err(UserInputError::DataStoreError(e)),
+        RedisCommand::Set(key, value, options) => {
+            if key.len() > 0 && value.len() > 0 {
+                match set_value(key, value, options) {
+                    Ok(resp) => Ok(resp),
+                    Err(e) => Err(UserInputError::DataStoreError(e)),
                 }
             } else {
                 Err(UserInputError::InvalidInput(
@@ -68,40 +73,41 @@ pub fn handle_input_cmd(input: Vec<&str>) -> Result<RespType, UserInputError> {
                 ))
             }
         }
-        RedisCommand::Config => {
-            match cmd.get(1) {
-                Some(action) if action.to_lowercase() == "get" => {
-                    let key = cmd.get(2).ok_or(UserInputError::InvalidInput(
-                        "No key provided for CONFIG GET".to_string(),
-                    ))?;
-                    match redisconfig::get_config(key) {
-                        Some(value) => {
-                            let key_resp = RespType::BulkString(Some(key.as_bytes().to_vec()));
-                            let val_resp = RespType::BulkString(Some(value.as_bytes().to_vec()));
-                            let res_resp = RespType::Array(Some(vec![key_resp, val_resp]));
-                            Ok(res_resp)
-                        }
-                        None => Ok(RespType::Array(None)),
-                    }
-                }
-                Some(action) if action.to_lowercase() == "set" => {
-                    let key = cmd.get(2).ok_or(UserInputError::InvalidInput(
-                        "No key provided for CONFIG SET".to_string(),
-                    ))?;
-                    let val = cmd.get(3).ok_or(UserInputError::InvalidInput(
-                        "No value provided for CONFIG SET".to_string(),
-                    ))?;
-                    // TODO: set config value
-                    Ok(RespType::SimpleString("OK".to_string()))
-                }
-                None => Err(UserInputError::InvalidInput(
-                    "No action provided for CONFIG command".to_string(),
-                )),
-                _ => Err(UserInputError::InvalidInput(format!(
-                    "Invalid action provided for CONFIG command: {}",
-                    cmd[1]
-                ))),
-            }
+        RedisCommand::Config(ops) => {
+            Ok(RespType::Error("Unimplemented".to_string()))
+            //     match ops.get(0) {
+            //         Some(action) if action.to_lowercase() == "get" => {
+            //             let key = ops.get(1).ok_or(UserInputError::InvalidInput(
+            //                 "No key provided for CONFIG GET".to_string(),
+            //             ))?;
+            //             match redisconfig::get_config(key) {
+            //                 Some(value) => {
+            //                     let key_resp = RespType::BulkString(Some(Bytes::from(key.as_bytes())));
+            //                     let val_resp = RespType::BulkString(Some(Bytes::from(value)));
+            //                     let res_resp = RespType::Array(Some(vec![key_resp, val_resp]));
+            //                     Ok(res_resp)
+            //                 }
+            //                 None => Ok(RespType::Array(None)),
+            //             }
+            //         }
+            //         Some(action) if action.to_lowercase() == "set" => {
+            //             let key = cmd.get(2).ok_or(UserInputError::InvalidInput(
+            //                 "No key provided for CONFIG SET".to_string(),
+            //             ))?;
+            //             let val = cmd.get(3).ok_or(UserInputError::InvalidInput(
+            //                 "No value provided for CONFIG SET".to_string(),
+            //             ))?;
+            //             // TODO: set config value
+            //             Ok(RespType::SimpleString("OK".to_string()))
+            //         }
+            //         None => Err(UserInputError::InvalidInput(
+            //             "No action provided for CONFIG command".to_string(),
+            //         )),
+            //         _ => Err(UserInputError::InvalidInput(format!(
+            //             "Invalid action provided for CONFIG command: {}",
+            //             cmd[1]
+            //         ))),
+            //     }
         }
         RedisCommand::Unknown(cmd) => Err(UserInputError::UnknownCommand(cmd)),
     }
@@ -157,11 +163,11 @@ mod tests {
                 let val = redis_value_to_string(&arr1[1]);
                 let arr2 = arr2.unwrap();
                 let rust_key = match &arr2[0] {
-                    RespType::BulkString(Some(bs)) => std::str::from_utf8(bs.as_slice()).unwrap(),
+                    RespType::BulkString(Some(bs)) => std::str::from_utf8(bs).unwrap(),
                     _ => panic!("Invalid response from rust redis"),
                 };
                 let rust_val = match &arr2[1] {
-                    RespType::BulkString(Some(bs)) => std::str::from_utf8(bs.as_slice()).unwrap(),
+                    RespType::BulkString(Some(bs)) => std::str::from_utf8(bs).unwrap(),
                     _ => panic!("Invalid response from rust redis"),
                 };
                 assert_eq!(key, rust_key);
@@ -172,6 +178,5 @@ mod tests {
     }
 
     #[test]
-    fn test_set_with_expire() {
-    }
+    fn test_set_with_expire() {}
 }
