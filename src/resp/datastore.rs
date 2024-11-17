@@ -1,6 +1,9 @@
-use chrono::{DateTime, Utc};
+use bytes::Bytes;
+use chrono::Utc;
+use lazy_static::lazy_static;
 use parking_lot::Mutex;
 use std::io::Read;
+use std::sync::Arc;
 use std::{collections::HashMap, fs::OpenOptions, io::Write, time::Duration};
 
 use crate::resp::constants::DATA_FILE_PATH;
@@ -11,9 +14,68 @@ use serde_derive::{Deserialize, Serialize};
 use super::resp_value::RespType;
 
 #[derive(Serialize, Deserialize)]
-struct MapValue {
-    value: String,
+pub struct MapValue {
+    pub value: String,
     expire_at: Option<i64>,
+}
+
+pub struct Db {
+    pub data: Arc<Mutex<HashMap<String, String>>>,
+}
+impl Db {
+    pub fn new() -> Self {
+        Self {
+            data: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    pub fn clone(&self) -> Self {
+        Self {
+            data: self.data.clone(),
+        }
+    }
+
+    pub fn get(&self, key: &str) -> Result<String, DataStoreError> {
+        let data = self.data.lock();
+        data.get(key)
+            .map(|x| x.clone())
+            .ok_or(DataStoreError::KeyNotFound)
+    }
+
+    pub fn set(&self, key: &str, val: &str, ops: Vec<String>) -> Result<(), DataStoreError> {
+        let mut data = self.data.lock();
+        data.insert(key.to_string(), val.to_string());
+        Ok(())
+    }
+
+    pub fn save(&self) -> Result<(), DataStoreError> {
+        let data = self.data.lock();
+        let json_data =
+            serde_json::to_string(&*data).map_err(|_| DataStoreError::SerializeError)?;
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(DATA_FILE_PATH)
+            .map_err(|_| DataStoreError::FileIOError)?;
+        file.write_all(json_data.as_bytes())
+            .map_err(|_| DataStoreError::FileIOError)?;
+        Ok(())
+    }
+
+    pub fn load(&self) -> Result<(), DataStoreError> {
+        let mut file = OpenOptions::new()
+            .read(true)
+            .open(DATA_FILE_PATH)
+            .map_err(|_| DataStoreError::FileIOError)?;
+        let mut json_str = String::new();
+        file.read_to_string(&mut json_str)
+            .map_err(|_| DataStoreError::FileIOError)?;
+        let map: HashMap<String, String> =
+            serde_json::from_str(json_str.as_str()).map_err(|_| DataStoreError::DataLoadError)?;
+        let mut data = self.data.lock();
+        *data = map;
+        Ok(())
+    }
 }
 
 lazy_static! {
@@ -44,7 +106,7 @@ pub fn get_value(key: &str) -> Result<String, DataStoreError> {
 pub fn set_value(
     key: String,
     value: String,
-    options: Vec<&str>,
+    options: Vec<String>,
 ) -> Result<RespType, DataStoreError> {
     let data = DATA.try_lock_for(*OP_TIMEOUT_SECS);
     if data.is_none() {
@@ -136,7 +198,7 @@ pub fn set_value(
             }
             if get.is_some() {
                 final_res = match d.get(key.as_str()) {
-                    Some(v) => RespType::BulkString(Some(v.value.clone().into_bytes())),
+                    Some(v) => RespType::BulkString(Some(Bytes::from(v.value.clone()))),
                     None => RespType::Null,
                 }
             }
@@ -144,45 +206,6 @@ pub fn set_value(
             Ok(final_res)
         }
     }
-}
-
-pub fn save() -> Result<(), DataStoreError> {
-    let data = DATA.try_lock_for(*OP_TIMEOUT_SECS);
-    match data {
-        None => {
-            eprintln!("Failed to acquire lock to save data");
-            Err(DataStoreError::LockError)
-        }
-        Some(data) => {
-            let json_data =
-                serde_json::to_string(&*data).map_err(|_| DataStoreError::SerializeError)?;
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create(true)
-                .open(DATA_FILE_PATH)
-                .map_err(|_| DataStoreError::FileIOError)?;
-            file.write_all(json_data.as_bytes())
-                .map_err(|_| DataStoreError::FileIOError)?;
-            Ok(())
-        }
-    }
-}
-
-pub fn load() -> Result<(), DataStoreError> {
-    let mut file = OpenOptions::new()
-        .read(true)
-        .open(DATA_FILE_PATH)
-        .map_err(|_| DataStoreError::FileIOError)?;
-    let mut json_str = String::new();
-    file.read_to_string(&mut json_str)
-        .map_err(|_| DataStoreError::FileIOError)?;
-    let map: HashMap<String, MapValue> =
-        serde_json::from_str(json_str.as_str()).map_err(|_| DataStoreError::DataLoadError)?;
-    let mut data = DATA
-        .try_lock_for(*OP_TIMEOUT_SECS)
-        .ok_or(DataStoreError::LockError)?;
-    *data = map;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -246,7 +269,11 @@ mod tests {
         clear_data();
         let key = "key".to_string();
         let value = "value".to_string();
-        let result = set_value(key.clone(), value.clone(), vec!["EX", "1"]);
+        let result = set_value(
+            key.clone(),
+            value.clone(),
+            vec!["EX".to_string(), "1".to_string()],
+        );
         assert!(result.is_ok());
         // wait for key to expire
         std::thread::sleep(Duration::from_secs(2));

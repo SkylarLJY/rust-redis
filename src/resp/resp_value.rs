@@ -10,6 +10,7 @@ pub enum RespType {
     BulkString(Option<Bytes>),
     Array(Option<Vec<RespType>>),
     Null,
+    Quit,
 }
 
 impl RespType {
@@ -38,6 +39,7 @@ impl RespType {
                 }
             },
             RespType::Null => b"_\r\n".to_vec(),
+            RespType::Quit => vec![],
         }
     }
 
@@ -61,6 +63,7 @@ impl RespType {
                 }
             },
             RespType::Null => 3,
+            RespType::Quit => 0,
         }
     }
 }

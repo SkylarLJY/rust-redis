@@ -1,8 +1,9 @@
 use super::{
-    datastore::{get_value, set_value},
+    datastore::{self},
     errors::UserInputError,
     resp_value::RespType,
 };
+use bytes::Bytes;
 use once_cell::sync::Lazy;
 use redis::{Client, Connection};
 
@@ -34,7 +35,10 @@ impl RedisCommand {
     }
 }
 
-pub fn handle_input_cmd(cmd: Vec<&str>) -> Result<RespType, UserInputError> {
+pub fn handle_input_cmd(
+    cmd: Vec<&str>,
+    db: &mut datastore::Db,
+) -> Result<RespType, UserInputError> {
     let resp_cmd = RedisCommand::from_str(cmd);
     // println!("{:?}", cmd.join(" ").replace("\r\n", "\\r\\n"));
 
@@ -51,9 +55,14 @@ pub fn handle_input_cmd(cmd: Vec<&str>) -> Result<RespType, UserInputError> {
         }
         RedisCommand::Get(key) => {
             if key.len() > 0 {
-                match get_value(&key) {
-                    Ok(value) => Ok(RespType::SimpleString(value)),
-                    Err(e) => Err(UserInputError::DataStoreError(e)),
+                // let db = db.data.lock();
+                // let res = db.get(&key.to_string()).cloned();
+                let res = db.get(&key);
+                match res {
+                    Ok(val) => Ok(RespType::BulkString(Some(Bytes::from(
+                        val.clone().into_bytes(),
+                    )))),
+                    Err(_) => Ok(RespType::Null),
                 }
             } else {
                 Err(UserInputError::InvalidInput(
@@ -63,10 +72,9 @@ pub fn handle_input_cmd(cmd: Vec<&str>) -> Result<RespType, UserInputError> {
         }
         RedisCommand::Set(key, value, options) => {
             if key.len() > 0 && value.len() > 0 {
-                match set_value(key, value, options) {
-                    Ok(resp) => Ok(resp),
-                    Err(e) => Err(UserInputError::DataStoreError(e)),
-                }
+                // let mut db = db.data.lock();
+                let _ = db.set(&key, &value, options);
+                Ok(RespType::SimpleString("OK".to_string()))
             } else {
                 Err(UserInputError::InvalidInput(
                     "No key/value provided to SET".to_string(),
@@ -155,7 +163,8 @@ mod tests {
         cmd.arg("GET").arg("save");
         let redis_res: Value = cmd.query(unsafe { &mut REDIS_CONN }).expect("ERR");
 
-        let rust_redis_res = handle_input_cmd(vec!["config", "get", "save"])
+        let test_db = &mut datastore::Db::new();
+        let rust_redis_res = handle_input_cmd(vec!["config", "get", "save"], test_db)
             .expect("Failed to get config from rust redis");
         match (redis_res, rust_redis_res) {
             (Value::Array(arr1), RespType::Array(arr2)) => {
