@@ -2,6 +2,7 @@ use bytes::Bytes;
 use chrono::Utc;
 use lazy_static::lazy_static;
 use parking_lot::Mutex;
+use std::hash::Hash;
 use std::io::Read;
 use std::sync::Arc;
 use std::{collections::HashMap, fs::OpenOptions, io::Write, time::Duration};
@@ -19,13 +20,20 @@ pub struct MapValue {
     expire_at: Option<i64>,
 }
 
+type Shard = Mutex<HashMap<String, String>>;
+
 pub struct Db {
-    pub data: Arc<Mutex<HashMap<String, String>>>,
+    pub data: Arc<Vec<Shard>>,
 }
+
 impl Db {
-    pub fn new() -> Self {
+    pub fn new(num_shards: usize) -> Self {
+        let mut db_with_shards = Vec::with_capacity(num_shards);
+        for _ in 0..num_shards {
+            db_with_shards.push(Mutex::new(HashMap::new()));
+        }
         Self {
-            data: Arc::new(Mutex::new(HashMap::new())),
+            data: Arc::new(db_with_shards),
         }
     }
 
@@ -35,23 +43,33 @@ impl Db {
         }
     }
 
+    fn get_shard_for_key(&self, key: &str) -> &Shard {
+        let i = key.len() % self.data.len();
+        &self.data[i]
+    }
+
     pub fn get(&self, key: &str) -> Result<String, DataStoreError> {
-        let data = self.data.lock();
+        let data = self.get_shard_for_key(key).lock();
         data.get(key)
             .map(|x| x.clone())
             .ok_or(DataStoreError::KeyNotFound)
     }
 
     pub fn set(&self, key: &str, val: &str, ops: Vec<String>) -> Result<(), DataStoreError> {
-        let mut data = self.data.lock();
+        let mut data = self.get_shard_for_key(key).lock();
         data.insert(key.to_string(), val.to_string());
         Ok(())
     }
 
+    // TOD: save & load with .rdb file
     pub fn save(&self) -> Result<(), DataStoreError> {
-        let data = self.data.lock();
-        let json_data =
-            serde_json::to_string(&*data).map_err(|_| DataStoreError::SerializeError)?;
+        let mut json_data = String::new();
+        for shard in self.data.iter() {
+            let data = shard.lock();
+            let conetent =
+                serde_json::to_string(&*data).map_err(|_| DataStoreError::SerializeError)?;
+            json_data.push_str(conetent.as_str());
+        }
         let mut file = OpenOptions::new()
             .write(true)
             .create(true)
@@ -63,18 +81,7 @@ impl Db {
     }
 
     pub fn load(&self) -> Result<(), DataStoreError> {
-        let mut file = OpenOptions::new()
-            .read(true)
-            .open(DATA_FILE_PATH)
-            .map_err(|_| DataStoreError::FileIOError)?;
-        let mut json_str = String::new();
-        file.read_to_string(&mut json_str)
-            .map_err(|_| DataStoreError::FileIOError)?;
-        let map: HashMap<String, String> =
-            serde_json::from_str(json_str.as_str()).map_err(|_| DataStoreError::DataLoadError)?;
-        let mut data = self.data.lock();
-        *data = map;
-        Ok(())
+        todo!()
     }
 }
 

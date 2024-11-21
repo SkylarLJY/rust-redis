@@ -14,8 +14,8 @@ use crate::resp::{
 use super::errors::ServerError;
 
 pub async fn run_server() -> Result<(), Error> {
-    let db = datastore::Db::new();
-    db.load().unwrap();
+    let db = datastore::Db::new(1);
+    // db.load().unwrap();
     let port = redisconfig::get_config("port")
         .unwrap_or("6379".to_string())
         .parse()

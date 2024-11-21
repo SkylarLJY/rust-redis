@@ -163,7 +163,7 @@ mod tests {
         cmd.arg("GET").arg("save");
         let redis_res: Value = cmd.query(unsafe { &mut REDIS_CONN }).expect("ERR");
 
-        let test_db = &mut datastore::Db::new();
+        let test_db = &mut datastore::Db::new(1);
         let rust_redis_res = handle_input_cmd(vec!["config", "get", "save"], test_db)
             .expect("Failed to get config from rust redis");
         match (redis_res, rust_redis_res) {
