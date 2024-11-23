@@ -4,5 +4,5 @@ pub mod datastore;
 pub mod deserialize;
 mod errors;
 pub mod redisconfig;
-mod resp_value;
+pub mod resp_value;
 pub mod server;

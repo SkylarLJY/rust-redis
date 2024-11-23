@@ -33,6 +33,29 @@ impl RedisCommand {
             _ => RedisCommand::Unknown(cmd.join(" ")),
         }
     }
+
+    pub fn to_string(&self) -> String {
+        match self {
+            RedisCommand::Ping => "PING".to_string(),
+            RedisCommand::Echo(s) => format!("ECHO {}", s),
+            RedisCommand::Get(key) => format!("GET {}", key),
+            RedisCommand::Set(key, value, options) => {
+                let mut res = format!("SET {} {}", key, value);
+                for opt in options {
+                    res.push_str(&format!(" {}", opt));
+                }
+                res
+            }
+            RedisCommand::Unknown(cmd) => cmd.to_string(),
+            RedisCommand::Config(ops) => {
+                let mut res = "CONFIG".to_string();
+                for op in ops {
+                    res.push_str(&format!(" {}", op));
+                }
+                res
+            }
+        }
+    }
 }
 
 pub fn handle_input_cmd(
